@@ -153,7 +153,7 @@ class ResourcePackTranslationsTest {
             service.checkForUpdates()
             assertEquals(1, downloads)
             assertEquals("Valid", service.translations["key"])
-            val cache = directory.resolve("blockbot-resourcepack-cache/v1/${sha1(pack)}/english-translations.json")
+            val cache = directory.resolve("blockbot-resourcepack-cache/v2/${sha1(pack)}/english-translations.json")
             assertTrue(Files.exists(cache))
             Files.delete(cache)
         }
@@ -219,7 +219,7 @@ class ResourcePackTranslationsTest {
         assertEquals(2, downloads)
         assertEquals(1, warnings.size)
         assertTrue(warnings.single().contains("SHA-1 does not match"))
-        assertFalse(Files.exists(directory.resolve("blockbot-resourcepack-cache/v1/$badHash/english-translations.json")))
+        assertFalse(Files.exists(directory.resolve("blockbot-resourcepack-cache/v2/$badHash/english-translations.json")))
         assertNoTemporaryFiles()
     }
 
@@ -255,7 +255,7 @@ class ResourcePackTranslationsTest {
         advertise(pack)
         service.checkForUpdates()
         assertSame(old, service.translations)
-        assertFalse(Files.exists(directory.resolve("blockbot-resourcepack-cache/v1/${sha1(pack)}/english-translations.json")))
+        assertFalse(Files.exists(directory.resolve("blockbot-resourcepack-cache/v2/${sha1(pack)}/english-translations.json")))
         assertEquals(1, warnings.size)
         assertNoTemporaryFiles()
     }
@@ -316,7 +316,7 @@ class ResourcePackTranslationsTest {
     fun `corrupt cache is replaced from a verified download`() {
         val pack = packOf(directory, "en_us" to """{"key":"Valid"}""")
         advertise(pack)
-        val cache = directory.resolve("blockbot-resourcepack-cache/v1/${sha1(pack)}/english-translations.json")
+        val cache = directory.resolve("blockbot-resourcepack-cache/v2/${sha1(pack)}/english-translations.json")
         Files.createDirectories(cache.parent)
         Files.writeString(cache, """{"key":false}""")
         var downloads = 0
@@ -338,7 +338,7 @@ class ResourcePackTranslationsTest {
             advertise(pack)
             service.checkForUpdates()
         }
-        Files.list(directory.resolve("blockbot-resourcepack-cache/v1")).use { assertEquals(3L, it.count()) }
+        Files.list(directory.resolve("blockbot-resourcepack-cache/v2")).use { assertEquals(3L, it.count()) }
         assertEquals("4", service.translations["version"])
         assertTrue(warnings.isEmpty())
     }
@@ -348,4 +348,4 @@ class ResourcePackTranslationsTest {
     }
 }
 
-private fun sha1(path: Path): String = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-1").digest(Files.readAllBytes(path)))
+internal fun sha1(path: Path): String = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-1").digest(Files.readAllBytes(path)))

@@ -76,6 +76,15 @@ escapeIngameMarkdown = false
     # Placeholders: {sender}, {sender_display}
     authorFormat = "{sender}"
 
+[ResourcePackEmojis]
+# Render private-use bitmap icons from the server pack as Discord application emoji.
+# When disabled, hide these glyphs and keep the readable text. Translations stay enabled.
+enabled = true
+# Name prefix: 1-16 ASCII letters, digits, or underscores. The artwork hash is appended.
+# When slots fill, the least-used managed emoji is replaced (including in older messages).
+# Changing this creates new emoji as needed. Reserve this prefix for BlockBot.
+prefix = "bb_"
+
 [ConsoleRelay]
 # Format to use for the console relay
 pattern = "[%level] (%logger{1}) %msg%n"

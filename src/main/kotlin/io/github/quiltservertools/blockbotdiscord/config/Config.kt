@@ -11,6 +11,7 @@ const val CONFIG_PATH = "blockbot-discord.toml"
 val config = Config {
     addSpec(BotSpec)
     addSpec(ChatRelaySpec)
+    addSpec(ResourcePackEmojisSpec)
     addSpec(ConsoleRelaySpec)
     addSpec(InlineCommandsSpec)
     addSpec(PresenceSpec)

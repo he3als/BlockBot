@@ -28,8 +28,10 @@ A full list of options can be found in the [configuration file](src/main/resourc
 BlockBot automatically loads English server resource-pack translations when
 Better Server Packs is configured, or `resource-pack` and `resource-pack-sha1`
 are set in `server.properties`. Better Server Packs takes priority.
+Custom bitmap icons from the pack's default font are relayed as Discord
+application emoji in chat and advancements.
 See [resource-pack translations](docs/resource-pack-translations.md)
-for fallback rules, caching, limits, and build instructions.
+for fallback rules, icons, caching, limits, and build instructions.
 
 ## License
 

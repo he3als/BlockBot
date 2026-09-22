@@ -65,11 +65,16 @@ For an unchanged active hash, no download or cache parsing occurs. For a new
 hash, BlockBot first checks:
 
 ```text
-config/blockbot-resourcepack-cache/v1/<sha1>/english-translations.json
+config/blockbot-resourcepack-cache/v2/<sha1>/english-translations.json
+config/blockbot-resourcepack-cache/v2/<sha1>/font-glyphs.json
 ```
 
-This UTF-8 JSON object contains the complete effective English map, including
-all fallback locales and namespaces. `v1` versions the cache's merge rules.
+The first UTF-8 JSON object contains the complete effective English map,
+including all fallback locales and namespaces. The second maps decimal Unicode
+code points to base64-encoded PNG icons (an empty string represents spacing).
+Both are built from the same SHA-1-verified ZIP and published together in memory.
+`v2` adds font artwork to the cache; upgrading from `v1` downloads the pack once
+to obtain its textures. Old `v1` cache directories can safely be deleted.
 The three most recently used hashes are retained; older entries are removed
 after a successful activation. Cached maps are read without downloading the ZIP
 and survive server restarts. The cache can be deleted while the server is
@@ -110,6 +115,89 @@ so a pack with no matching language files is distinguishable from a cache miss.
 Entries are read directly from the ZIP and never extracted. Traversal paths are
 excluded. Cache publication requires the filesystem to support atomic renames
 within the cache directory; failure retains the current map.
+
+## Resource-pack icons on Discord
+
+Private-use characters such as `\ue00f` are Minecraft font glyphs, not standard
+Unicode emoji. BlockBot follows bitmap and reference providers from
+`assets/minecraft/font/default.json`, including references to other namespaces,
+and crops the corresponding PNG texture cells. Transparent padding is trimmed
+and each icon is scaled to 128×128 with nearest-neighbor sampling.
+PNG transparency (including translucent pixels) is preserved, and any added
+padding is transparent. Opaque pixels in the source artwork are left intact;
+BlockBot does not guess which colors might be a background.
+The first provider defining a character wins; space providers produce no icon.
+
+The following optional section in `config/blockbot-discord.toml` controls this
+feature. Existing configurations use these defaults without needing edits:
+
+```toml
+[ResourcePackEmojis]
+enabled = true
+prefix = "bb_"
+```
+
+Set `enabled = false` to omit custom glyphs without making Discord emoji API
+requests; translation handling continues normally. `prefix` accepts 1–16 ASCII
+letters, digits, or underscores. An artwork hash is appended to produce a name
+at most 32 characters long. An invalid prefix logs a warning and uses `bb_`.
+Settings follow BlockBot's existing config-file reload behavior. Changing the
+prefix creates newly named emoji on demand. Reserve the configured prefix for
+BlockBot's generated emoji.
+
+When an icon appears in chat or an advancement, BlockBot creates a Discord
+**application-owned emoji** from its artwork. These use the bot application's
+emoji slots, not the guild's slots, and do not require additional guild emoji
+permissions. See [Discord's application emoji documentation](https://docs.discord.com/developers/resources/emoji#application-owned-emoji).
+Uploads happen on the bot coroutine, never on the Minecraft server thread.
+Only used icons are uploaded, with at most 16 new emoji per message and a
+10-second time budget. Artwork hashes determine the prefixed names (by default
+`bb_...`), so identical icons are reused across pack updates and server restarts.
+The remote list is refreshed after five minutes of use.
+
+When the application's 2,000 slots are full (or Discord reports a full emoji
+inventory), BlockBot refreshes the inventory and replaces the **least frequently
+used managed emoji** on demand. Usage counts are rendered occurrences during
+the current server run; ties prefer the least recently used icon, then its name.
+Unused icons discovered at startup have a count of zero. Counts reset on restart.
+Only names matching a prefix used by BlockBot in this run plus its generated
+hash are eligible. Unrelated emoji are never deleted. Icons needed by the
+current message or another message still being sent are protected. If no
+eligible icon exists, the new glyph is omitted and subsequent messages can try
+again. Eviction is logged and the requested icon is uploaded immediately.
+Deleting an emoji also removes its artwork from older Discord messages.
+
+Advancement descriptions containing glyphs move from the footer into the embed
+description, where Discord renders custom emoji. Announcements with glyphs in
+the title also move into the description. Ordinary advancements retain their
+existing layout. Markdown in the original text remains escaped; generated emoji
+markup is inserted afterward. Normal Unicode emoji are unchanged.
+If emoji markup would exceed Discord's message/description length limit,
+excess icons are omitted while preserving the surrounding text.
+
+If artwork is missing or unsupported, or Discord rejects/times out an upload,
+the message is sent without that glyph so its text remains readable. Previously
+uploaded icons remain available during an API outage. Failures are logged with
+a five-minute retry delay; the relay and translation cache continue working.
+
+Supported artwork is limited to private-use bitmap glyphs reachable from the
+default font. Explicit component-specific fonts, TTF/Unihex glyph rasterization,
+pack overlays, animated textures, and client-specific font options are not
+emulated. A malformed font graph disables icons for that candidate pack while
+retaining its translations. Font processing is bounded to 128 referenced fonts,
+16 reference levels, 2,048 providers, 512 glyphs, 32 MiB of font input, and
+16 million decoded pixels total. PNG sheets are limited to 4096 pixels per axis
+and four million pixels each. Entries are read directly without extraction.
+
+At startup, `Loaded N resource-pack icons for Discord` reports the available
+artwork. Replacing the jar and restarting is sufficient; no extra configuration
+is needed. On the first occurrence of `\ue00f Silver…`, its image is uploaded
+and used inline in the advancement description. Tests cover font references,
+Unicode code points, atlas cropping, cache reloads, concurrent upload reuse,
+API failure/cancellation, and actual Kord emoji creation and webhook payloads
+using mocked HTTP. Slot-limit tests cover least-used replacement, recency ties,
+unrelated emoji, messages still being sent, and Discord's full-inventory error.
+Live rendering still needs verification against your pack and Discord server.
 
 ## Build and use
 

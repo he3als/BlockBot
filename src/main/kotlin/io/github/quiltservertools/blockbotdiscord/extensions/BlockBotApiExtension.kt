@@ -20,7 +20,6 @@ import dev.kord.core.entity.channel.TopGuildMessageChannel
 import dev.kord.core.event.message.MessageCreateEvent
 import dev.kord.rest.builder.message.AllowedMentionsBuilder
 import dev.kord.rest.builder.message.EmbedBuilder
-import dev.kord.rest.builder.message.embed
 import dev.vankka.mcdiscordreserializer.discord.DiscordSerializer
 import dev.vankka.mcdiscordreserializer.discord.DiscordSerializerOptions
 import dev.vankka.mcdiscordreserializer.minecraft.MinecraftSerializer
@@ -34,7 +33,10 @@ import io.github.quiltservertools.blockbotapi.sender.RelayMessageSender
 import io.github.quiltservertools.blockbotdiscord.BlockBotDiscord
 import io.github.quiltservertools.blockbotdiscord.MentionToMinecraftRenderer
 import io.github.quiltservertools.blockbotdiscord.logWarn
+import io.github.quiltservertools.blockbotdiscord.logInfo
 import io.github.quiltservertools.blockbotdiscord.config.*
+import io.github.quiltservertools.blockbotdiscord.translation.DiscordPackEmojis
+import io.github.quiltservertools.blockbotdiscord.translation.advancementEmbed
 import io.github.quiltservertools.blockbotdiscord.translation.withResourcePackTranslations
 import io.github.quiltservertools.blockbotdiscord.utility.*
 import kotlinx.coroutines.flow.filter
@@ -87,6 +89,20 @@ class BlockBotApiExtension : Extension(), Bot {
     )
     private val server: MinecraftServer by inject()
     private val mentions = AllowedMentionsBuilder()
+    private val packEmojis by lazy { DiscordPackEmojis(kord, ::logWarn, ::logInfo) }
+
+    private fun launchWithPackEmojis(block: suspend () -> Unit) = BlockBotDiscord.launch {
+        packEmojis.withMessage(block)
+    }
+
+    private suspend fun renderPackEmojis(text: String, maxLength: Int = 2000): String =
+        packEmojis.render(
+            text,
+            BlockBotDiscord.resourcePackTranslations.glyphs,
+            maxLength,
+            config[ResourcePackEmojisSpec.enabled],
+            config[ResourcePackEmojisSpec.emojiPrefix],
+        )
 
     private fun translate(component: Component): String =
         component.withResourcePackTranslations(BlockBotDiscord.resourcePackTranslations.translations).string
@@ -272,38 +288,44 @@ class BlockBotApiExtension : Extension(), Bot {
     }
 
     suspend fun createDiscordEmbed(builder: EmbedBuilder.() -> Unit) {
+        createDiscordEmbed(EmbedBuilder().apply(builder))
+    }
+
+    private suspend fun createDiscordEmbed(embed: EmbedBuilder) {
         if (config[ChatRelaySpec.WebhookSpec.useWebhook]) {
             chatWebhook.execute(chatWebhook.token!!) {
                 avatarUrl = config[ChatRelaySpec.WebhookSpec.webhookAvatar]
                 allowedMentions = mentions
-                embeds = mutableListOf(EmbedBuilder().apply(builder))
+                embeds = mutableListOf(embed)
             }
         } else {
             val messageChannel = config.getChannel(Channels.CHAT, bot)
             messageChannel.createMessage {
                 allowedMentions = mentions
-                embed(builder)
+                embeds = mutableListOf(embed)
             }
         }
     }
 
-    suspend fun createDiscordMessage(content: String) {
+    suspend fun createDiscordMessage(content: String) = packEmojis.withMessage {
+        val rendered = renderPackEmojis(content)
+        if (rendered.isEmpty()) return@withMessage
         if (config[ChatRelaySpec.WebhookSpec.useWebhook]) {
             chatWebhook.execute(chatWebhook.token!!) {
                 allowedMentions = mentions
-                this.content = content
+                this.content = rendered
             }
         } else {
             val messageChannel = config.getChannel(Channels.CHAT, bot)
             messageChannel.createMessage {
                 allowedMentions = mentions
-                this.content = content
+                this.content = rendered
             }
         }
     }
 
     override fun onChatMessage(sender: MessageSender, message: Component) {
-        BlockBotDiscord.launch {
+        launchWithPackEmojis {
             var content = discordSerializer.serialize(
                 message.toAdventure(sender.wrapperLookup),
                 discordSerializer.defaultOptions.withEscapeMarkdown(config[ChatRelaySpec.escapeIngameMarkdown])
@@ -314,20 +336,22 @@ class BlockBotApiExtension : Extension(), Bot {
             content = convertStringToEmoji(content, config.getGuild(bot))
 
             if (config[ChatRelaySpec.WebhookSpec.useWebhook]) {
-                if (sender.formatWebhookContent(content).isEmpty()) return@launch
+                val rendered = renderPackEmojis(sender.formatWebhookContent(content))
+                if (rendered.isEmpty()) return@launchWithPackEmojis
                 chatWebhook.execute(chatWebhook.token!!) {
                     this.allowedMentions = mentions
                     this.username = config.formatWebhookAuthor(sender)
-                    this.content = sender.formatWebhookContent(content)
+                    this.content = rendered
                     this.avatarUrl = sender.getAvatar()
                 }
             } else {
-                if (sender.formatMessageContent(content).isEmpty()) return@launch
+                val rendered = renderPackEmojis(sender.formatMessageContent(content))
+                if (rendered.isEmpty()) return@launchWithPackEmojis
 
                 val messageChannel = config.getChannel(Channels.CHAT, bot)
                 messageChannel.createMessage {
                     allowedMentions = mentions
-                    this.content = sender.formatMessageContent(content)
+                    this.content = rendered
                 }
             }
         }
@@ -382,17 +406,17 @@ class BlockBotApiExtension : Extension(), Bot {
 
     override fun onAdvancementGrant(player: ServerPlayer, advancement: Advancement) {
         if (config.formatPlayerAdvancementMessage(player, advancement, ::translate).isEmpty() || player.isVanished()) return
-        BlockBotDiscord.launch {
-            createDiscordEmbed {
-                author {
-                    name = config.formatPlayerAdvancementMessage(player, advancement, ::translate)
-                    icon = config.getWebhookChatRelayAvatar(player.gameProfile)
-                }
-                footer {
-                    text = translate(advancement.display.get().description)
-                }
-                color = Colors.blue
-            }
+        launchWithPackEmojis {
+            val emojiEnabled = config[ResourcePackEmojisSpec.enabled]
+            val title = config.formatPlayerAdvancementMessage(player, advancement, ::translate)
+            val details = translate(advancement.display.get().description)
+            val embed = advancementEmbed(
+                if (emojiEnabled) title else DiscordPackEmojis.withoutGlyphs(title),
+                if (emojiEnabled) details else DiscordPackEmojis.withoutGlyphs(details),
+                config.getWebhookChatRelayAvatar(player.gameProfile),
+            ) { renderPackEmojis(it, maxLength = 4096) }
+            embed.color = Colors.blue
+            createDiscordEmbed(embed)
         }
     }
 
