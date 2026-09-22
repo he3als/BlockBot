@@ -68,6 +68,33 @@ class ResourcePackGlyphsTest {
     }
 
     @Test
+    fun `nearest neighbour scaling keeps exact pixel art colours and sharp boundaries`() {
+        val image = BufferedImage(2, 2, BufferedImage.TYPE_INT_ARGB)
+        val colours = listOf(0xff123456, 0xffabcdef, 0xffa020ff, 0xffffffff).map { it.toInt() }
+        colours.forEachIndexed { index, colour -> image.setRGB(index % 2, index / 2, colour) }
+        val pack = iconPack(directory, """{"providers":[
+            {"type":"bitmap","file":"kleispack:font/icons.png","chars":["\ue00f"]}
+        ]}""", png(image))
+        val icon = decoded(ResourcePackGlyphs.readPack(pack).getValue(0xe00f))
+        for (y in 0 until 128) for (x in 0 until 128) {
+            assertEquals(colours[(y / 64) * 2 + x / 64], icon.getRGB(x, y))
+        }
+    }
+
+    @Test
+    fun `tint multiplies RGB like Minecraft and preserves each alpha value without interpolation`() {
+        val image = BufferedImage(128, 128, BufferedImage.TYPE_INT_ARGB)
+        image.setRGB(0, 0, 0x80ffffff.toInt())
+        image.setRGB(1, 0, 0xff804020.toInt())
+        val original = Base64.getEncoder().encodeToString(png(image))
+        val tinted = decoded(ResourcePackGlyphs.tint(original, 0x804020))
+        assertEquals(0x80804020.toInt(), tinted.getRGB(0, 0))
+        assertEquals(0xff401004.toInt(), tinted.getRGB(1, 0))
+        assertEquals(0, tinted.getRGB(2, 0))
+        assertEquals(original, ResourcePackGlyphs.tint(original, 0xffffff))
+    }
+
+    @Test
     fun `cyclic references terminate and missing vanilla font references are tolerated`() {
         val pack = iconPack(directory, """{"providers":[
             {"type":"reference","id":"minecraft:default"},

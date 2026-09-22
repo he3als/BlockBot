@@ -143,13 +143,16 @@ class DiscordPackEmojisTest {
         val defaults = Config { addSpec(ResourcePackEmojisSpec) }
         assertEquals(true, defaults[ResourcePackEmojisSpec.enabled])
         assertEquals("bb_", defaults[ResourcePackEmojisSpec.emojiPrefix])
+        assertEquals(true, defaults[ResourcePackEmojisSpec.coloured])
         val overrides = defaults.from.toml.string("""
             [ResourcePackEmojis]
             enabled = false
             prefix = "kleis_"
+            coloured = false
         """.trimIndent())
         assertEquals(false, overrides[ResourcePackEmojisSpec.enabled])
         assertEquals("kleis_", overrides[ResourcePackEmojisSpec.emojiPrefix])
+        assertEquals(false, overrides[ResourcePackEmojisSpec.coloured])
     }
 
     @Test

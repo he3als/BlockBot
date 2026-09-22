@@ -24,7 +24,7 @@ internal class ResourcePackTranslations(
     private val nanoTime: () -> Long = System::nanoTime,
 ) : AutoCloseable {
     private data class Source(val hash: String, val url: URI, val origin: String)
-    private data class Snapshot(
+    internal data class Snapshot(
         val hash: String?,
         val translations: Map<String, String>,
         val glyphs: Map<Int, String>,
@@ -32,6 +32,7 @@ internal class ResourcePackTranslations(
 
     @Volatile
     private var active = Snapshot(null, emptyMap(), emptyMap())
+    val snapshot: Snapshot get() = active
     val translations: Map<String, String> get() = active.translations
     val glyphs: Map<Int, String> get() = active.glyphs
 

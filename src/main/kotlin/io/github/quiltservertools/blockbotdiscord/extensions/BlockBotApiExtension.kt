@@ -36,6 +36,7 @@ import io.github.quiltservertools.blockbotdiscord.logWarn
 import io.github.quiltservertools.blockbotdiscord.logInfo
 import io.github.quiltservertools.blockbotdiscord.config.*
 import io.github.quiltservertools.blockbotdiscord.translation.DiscordPackEmojis
+import io.github.quiltservertools.blockbotdiscord.translation.ResourcePackEmojiText
 import io.github.quiltservertools.blockbotdiscord.translation.advancementEmbed
 import io.github.quiltservertools.blockbotdiscord.translation.withResourcePackTranslations
 import io.github.quiltservertools.blockbotdiscord.utility.*
@@ -100,10 +101,22 @@ class BlockBotApiExtension : Extension(), Bot {
         packEmojis.withMessage(block)
     }
 
-    private suspend fun renderPackEmojis(text: String, maxLength: Int = 2000): String =
+    private fun emojiText(): ResourcePackEmojiText {
+        val pack = BlockBotDiscord.resourcePackTranslations.snapshot
+        return ResourcePackEmojiText(
+            pack.translations, pack.glyphs,
+            config[ResourcePackEmojisSpec.enabled] && config[ResourcePackEmojisSpec.coloured], ::logWarn,
+        )
+    }
+
+    private suspend fun renderPackEmojis(
+        text: String,
+        maxLength: Int = 2000,
+        glyphs: Map<Int, String> = BlockBotDiscord.resourcePackTranslations.glyphs,
+    ): String =
         packEmojis.render(
             text,
-            BlockBotDiscord.resourcePackTranslations.glyphs,
+            glyphs,
             maxLength,
             config[ResourcePackEmojisSpec.enabled],
             config[ResourcePackEmojisSpec.emojiPrefix],
@@ -331,8 +344,9 @@ class BlockBotApiExtension : Extension(), Bot {
 
     override fun onChatMessage(sender: MessageSender, message: Component) {
         launchWithPackEmojis {
+            val emojiText = emojiText()
             var content = discordSerializer.serialize(
-                message.toAdventure(sender.wrapperLookup),
+                emojiText.prepare(message).toAdventure(sender.wrapperLookup),
                 discordSerializer.defaultOptions.withEscapeMarkdown(config[ChatRelaySpec.escapeIngameMarkdown])
             )
             if (config[ChatRelaySpec.allowMentions]) {
@@ -341,7 +355,7 @@ class BlockBotApiExtension : Extension(), Bot {
             content = convertStringToEmoji(content, config.getGuild(bot))
 
             if (config[ChatRelaySpec.WebhookSpec.useWebhook]) {
-                val rendered = renderPackEmojis(sender.formatWebhookContent(content))
+                val rendered = renderPackEmojis(sender.formatWebhookContent(content), glyphs = emojiText.glyphs)
                 if (rendered.isEmpty()) return@launchWithPackEmojis
                 chatWebhook.execute(chatWebhook.token!!) {
                     this.allowedMentions = mentions
@@ -350,7 +364,7 @@ class BlockBotApiExtension : Extension(), Bot {
                     this.avatarUrl = sender.getAvatar()
                 }
             } else {
-                val rendered = renderPackEmojis(sender.formatMessageContent(content))
+                val rendered = renderPackEmojis(sender.formatMessageContent(content), glyphs = emojiText.glyphs)
                 if (rendered.isEmpty()) return@launchWithPackEmojis
 
                 val messageChannel = config.getChannel(Channels.CHAT, bot)
@@ -413,13 +427,14 @@ class BlockBotApiExtension : Extension(), Bot {
         if (config.formatPlayerAdvancementMessage(player, advancement, ::translate).isEmpty() || player.isVanished()) return
         launchWithPackEmojis {
             val emojiEnabled = config[ResourcePackEmojisSpec.enabled]
-            val title = config.formatPlayerAdvancementMessage(player, advancement, ::translate)
-            val details = translate(advancement.display.get().description)
+            val emojiText = emojiText()
+            val title = config.formatPlayerAdvancementMessage(player, advancement, emojiText::translate)
+            val details = emojiText.translate(advancement.display.get().description)
             val embed = advancementEmbed(
                 if (emojiEnabled) title else DiscordPackEmojis.withoutGlyphs(title),
                 if (emojiEnabled) details else DiscordPackEmojis.withoutGlyphs(details),
                 config.getWebhookChatRelayAvatar(player.gameProfile),
-            ) { renderPackEmojis(it, maxLength = 4096) }
+            ) { renderPackEmojis(it, maxLength = 4096, glyphs = emojiText.glyphs) }
             embed.color = Colors.blue
             createDiscordEmbed(embed)
         }

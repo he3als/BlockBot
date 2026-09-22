@@ -84,6 +84,9 @@ enabled = true
 # When slots fill, the least-used managed emoji is replaced (including in older messages).
 # Changing this creates new emoji as needed. Reserve this prefix for BlockBot.
 prefix = "bb_"
+# Tint icons with their Minecraft text colour. False keeps the original texture colours.
+# Transparency is preserved and resizing always uses nearest-neighbour interpolation.
+coloured = true
 
 [ConsoleRelay]
 # Format to use for the console relay

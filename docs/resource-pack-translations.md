@@ -52,7 +52,7 @@ language loader. Malformed formats fall back to the literal template, as in
 Minecraft.
 The serializer still handles Markdown escaping, outer styles, and children.
 As with the existing provider, formatting within translation arguments is
-flattened to plain text.
+flattened to plain text, but icon colours are captured before flattening.
 
 ## Updates and cache
 
@@ -124,8 +124,8 @@ Unicode emoji. BlockBot follows bitmap and reference providers from
 and crops the corresponding PNG texture cells. Transparent padding is trimmed
 and each icon is scaled to 128×128 with nearest-neighbor sampling.
 PNG transparency (including translucent pixels) is preserved, and any added
-padding is transparent. Opaque pixels in the source artwork are left intact;
-BlockBot does not guess which colors might be a background.
+padding is transparent. Opaque pixels stay opaque; BlockBot does not guess
+which colours might be a background.
 The first provider defining a character wins; space providers produce no icon.
 
 The following optional section in `config/blockbot-discord.toml` controls this
@@ -135,7 +135,18 @@ feature. Existing configurations use these defaults without needing edits:
 [ResourcePackEmojis]
 enabled = true
 prefix = "bb_"
+coloured = true
 ```
+
+With `coloured = true`, icons in Minecraft components match their text colour,
+including colours inherited from a parent and colours on translation arguments.
+Like Minecraft, BlockBot multiplies the texture's RGB channels by the text
+colour while preserving alpha. White or unstyled text retains the original
+artwork. Set `coloured = false` to always use the texture's original colours.
+This affects icons in chat and advancement titles/descriptions; ordinary Discord
+text is unchanged. Plain-string messages have no Minecraft colour information
+and use the original artwork. Both modes use nearest-neighbour scaling, with
+no smoothing or blended pixels.
 
 Set `enabled = false` to omit custom glyphs without making Discord emoji API
 requests; translation handling continues normally. `prefix` accepts 1–16 ASCII
@@ -154,6 +165,11 @@ Only used icons are uploaded, with at most 16 new emoji per message and a
 10-second time budget. Artwork hashes determine the prefixed names (by default
 `bb_...`), so identical icons are reused across pack updates and server restarts.
 The remote list is refreshed after five minutes of use.
+Each distinct tinted image uses its own slot and usage count; identical colours
+reuse the same emoji across messages and restarts. The on-disk font cache keeps
+the original artwork, so changing this setting requires no pack download.
+Tint generation is bounded to 128 variants per message; additional variants
+or failed tint operations use the original artwork.
 
 When the application's 2,000 slots are full (or Discord reports a full emoji
 inventory), BlockBot refreshes the inventory and replaces the **least frequently
@@ -228,6 +244,8 @@ unrelated emoji, messages still being sent, and Discord's full-inventory error.
 Persistence and concurrency tests cover restart counts/recency, atomic write
 failure, simultaneous increments, delayed deletion/upload/send responses,
 queue cancellation, and ambiguous deletion failures.
+Colour tests cover inherited styles, translated arguments, per-colour upload
+reuse, alpha preservation, disabled tinting, and nearest-neighbour pixel output.
 Live rendering still needs verification against your pack and Discord server.
 
 ## Build and use

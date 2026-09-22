@@ -25,6 +25,46 @@ internal object ResourcePackGlyphs {
 
     fun isPrivateUse(codePoint: Int): Boolean = Character.getType(codePoint) == Character.PRIVATE_USE.toInt()
 
+    /** Minecraft multiplies the font texture's RGB by the component's text colour. */
+    fun tint(encoded: String, colour: Int): String {
+        if (colour == 0xffffff || encoded.isEmpty()) return encoded
+        val bytes = Base64.getDecoder().decode(encoded)
+        require(bytes.size <= MAX_PNG_BYTES) { "Icon image exceeds size limit" }
+        val image = MemoryCacheImageInputStream(bytes.inputStream()).use { input ->
+            val reader = ImageIO.getImageReadersByFormatName("png").next()
+            try {
+                reader.input = input
+                require(reader.getWidth(0) == 128 && reader.getHeight(0) == 128) { "Invalid cached icon dimensions" }
+                reader.read(0)
+            } finally {
+                reader.dispose()
+            }
+        }
+        try {
+            val pixels = image.getRGB(0, 0, image.width, image.height, null, 0, image.width)
+            for (index in pixels.indices) {
+                val pixel = pixels[index]
+                val red = ((pixel ushr 16) and 255) * ((colour ushr 16) and 255) / 255
+                val green = ((pixel ushr 8) and 255) * ((colour ushr 8) and 255) / 255
+                val blue = (pixel and 255) * (colour and 255) / 255
+                pixels[index] = (pixel and 0xff000000.toInt()) or (red shl 16) or (green shl 8) or blue
+            }
+            // Always use ARGB: indexed PNGs may not have the tinted colours in their palette.
+            val tinted = BufferedImage(128, 128, BufferedImage.TYPE_INT_ARGB)
+            try {
+                tinted.setRGB(0, 0, 128, 128, pixels, 0, 128)
+                val output = ByteArrayOutputStream()
+                check(ImageIO.write(tinted, "png", output))
+                require(output.size() <= MAX_PNG_BYTES) { "Icon image exceeds size limit" }
+                return Base64.getEncoder().encodeToString(output.toByteArray())
+            } finally {
+                tinted.flush()
+            }
+        } finally {
+            image.flush()
+        }
+    }
+
     fun readPack(path: Path): Map<Int, String> = ZipFile(path.toFile()).use { zip ->
         val result = mutableMapOf<Int, String>()
         val fonts = mutableSetOf<String>()
