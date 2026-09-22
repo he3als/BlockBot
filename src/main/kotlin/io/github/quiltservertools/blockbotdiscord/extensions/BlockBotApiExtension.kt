@@ -34,6 +34,7 @@ import io.github.quiltservertools.blockbotapi.sender.RelayMessageSender
 import io.github.quiltservertools.blockbotdiscord.BlockBotDiscord
 import io.github.quiltservertools.blockbotdiscord.MentionToMinecraftRenderer
 import io.github.quiltservertools.blockbotdiscord.config.*
+import io.github.quiltservertools.blockbotdiscord.translation.withResourcePackTranslations
 import io.github.quiltservertools.blockbotdiscord.utility.*
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
@@ -79,10 +80,15 @@ class BlockBotApiExtension : Extension(), Bot {
     private val discordSerializer = DiscordSerializer(
         DiscordSerializerOptions.defaults()
             .withKeybindProvider { Component.translatable(it.keybind()).string }
-            .withTranslationProvider { it.toNative(server.registryAccess()).string }
+            // 4.3.0 expects fully substituted plain text; it serializes children
+            // separately and escapes Discord markdown after calling this provider.
+            .withTranslationProvider { translate(it.children(emptyList()).toNative(server.registryAccess())) }
     )
     private val server: MinecraftServer by inject()
     private val mentions = AllowedMentionsBuilder()
+
+    private fun translate(component: Component): String =
+        component.withResourcePackTranslations(BlockBotDiscord.resourcePackTranslations.translations).string
 
     override suspend fun setup() {
         val channel = config.getChannel(Channels.CHAT, bot)
@@ -357,11 +363,11 @@ class BlockBotApiExtension : Extension(), Bot {
     }
 
     override fun onPlayerDeath(player: ServerPlayer, message: Component) {
-        if (config.formatPlayerDeathMessage(player, message).isEmpty() || player.isVanished()) return
+        if (config.formatPlayerDeathMessage(player, message, ::translate).isEmpty() || player.isVanished()) return
         BlockBotDiscord.launch {
             createDiscordEmbed {
                 author {
-                    name = config.formatPlayerDeathMessage(player, message)
+                    name = config.formatPlayerDeathMessage(player, message, ::translate)
                     icon = config.getWebhookChatRelayAvatar(player.gameProfile)
                 }
                 color = Colors.orange
@@ -370,15 +376,15 @@ class BlockBotApiExtension : Extension(), Bot {
     }
 
     override fun onAdvancementGrant(player: ServerPlayer, advancement: Advancement) {
-        if (config.formatPlayerAdvancementMessage(player, advancement).isEmpty() || player.isVanished()) return
+        if (config.formatPlayerAdvancementMessage(player, advancement, ::translate).isEmpty() || player.isVanished()) return
         BlockBotDiscord.launch {
             createDiscordEmbed {
                 author {
-                    name = config.formatPlayerAdvancementMessage(player, advancement)
+                    name = config.formatPlayerAdvancementMessage(player, advancement, ::translate)
                     icon = config.getWebhookChatRelayAvatar(player.gameProfile)
                 }
                 footer {
-                    text = advancement.display.get().description.string
+                    text = translate(advancement.display.get().description)
                 }
                 color = Colors.blue
             }

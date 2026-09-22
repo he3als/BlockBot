@@ -91,19 +91,29 @@ fun Config.formatPlayerJoinMessage(player: ServerPlayer): String =
 fun Config.formatPlayerLeaveMessage(player: ServerPlayer): String =
     formatDiscordRelayMessage(player, config[ChatRelaySpec.DiscordMessageFormatSpec.playerLeave]).string
 
-fun Config.formatPlayerDeathMessage(player: ServerPlayer, message: Component): String =
+fun Config.formatPlayerDeathMessage(
+    player: ServerPlayer,
+    message: Component,
+    render: (Component) -> String = { it.string },
+): String = render(
     formatDiscordRelayMessage(
         player,
         config[ChatRelaySpec.DiscordMessageFormatSpec.playerDeath],
         mapOf("message" to message)
-    ).string
+    )
+)
 
-fun Config.formatPlayerAdvancementMessage(player: ServerPlayer, advancement: Advancement): String =
+fun Config.formatPlayerAdvancementMessage(
+    player: ServerPlayer,
+    advancement: Advancement,
+    render: (Component) -> String = { it.string },
+): String = render(
     formatDiscordRelayMessage(
         player,
         config[ChatRelaySpec.DiscordMessageFormatSpec.playerAdvancement],
         mapOf("advancement" to advancement.display.get().title)
-    ).string
+    )
+)
 
 fun Config.formatServerStartMessage(server: MinecraftServer): String =
     formatDiscordRelayMessage(server, config[ChatRelaySpec.DiscordMessageFormatSpec.serverStart])

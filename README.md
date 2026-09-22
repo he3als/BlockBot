@@ -24,6 +24,12 @@ guild =
     chat = 
 ```
 A full list of options can be found in the [configuration file](src/main/resources/blockbot-discord.toml).
+
+BlockBot automatically loads English server resource-pack translations when
+[Better Server Packs](https://github.com/Fisch37/better-server-packs-fabric) is
+configured. See [resource-pack translations](docs/resource-pack-translations.md)
+for fallback rules, caching, limits, and build instructions.
+
 ## License
 
 BlockBot is available under the GNU LGPL v3.0 license. See LICENSE

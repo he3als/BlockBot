@@ -117,6 +117,9 @@ dependencies {
     shadow(libs.konf.base)
     shadow(libs.konf.toml)
 
+    testImplementation(kotlin("test-junit5"))
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+
     implementation("com.ibm.icu:icu4j:74.2")
     include("com.ibm.icu:icu4j:74.2")
     shadow("com.ibm.icu:icu4j:74.2")
@@ -160,6 +163,10 @@ publishMods {
 }
 
 tasks {
+    test {
+        useJUnitPlatform()
+    }
+
     jar {
         destinationDirectory.set(project.layout.buildDirectory.dir("devlibs"))
         archiveClassifier.set("dev")

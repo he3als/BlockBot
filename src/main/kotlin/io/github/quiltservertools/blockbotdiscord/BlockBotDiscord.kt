@@ -16,6 +16,7 @@ import io.github.quiltservertools.blockbotdiscord.extensions.inline.InlineComman
 import io.github.quiltservertools.blockbotdiscord.extensions.linking.JsonLinkedAccounts
 import io.github.quiltservertools.blockbotdiscord.extensions.linking.LinkCommand
 import io.github.quiltservertools.blockbotdiscord.extensions.linking.LinkingExtension
+import io.github.quiltservertools.blockbotdiscord.translation.ResourcePackTranslations
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -37,6 +38,7 @@ object BlockBotDiscord : ModInitializer, CoroutineScope {
     lateinit var bot: ExtensibleBot
 
     val linkedAccounts = JsonLinkedAccounts()
+    internal lateinit var resourcePackTranslations: ResourcePackTranslations
 
     override fun onInitialize() {
         logInfo("Initializing")
@@ -56,6 +58,7 @@ object BlockBotDiscord : ModInitializer, CoroutineScope {
         linkedAccounts.load()
 
         ServerLifecycleEvents.SERVER_STARTING.register(BlockBotDiscord::serverStarting)
+        ServerLifecycleEvents.SERVER_STOPPING.register { resourcePackTranslations.close() }
         CommandRegistrationCallback.EVENT.register { dispatcher, _, _ ->
             LinkCommand(dispatcher).register()
         }
@@ -64,6 +67,8 @@ object BlockBotDiscord : ModInitializer, CoroutineScope {
     }
 
     private fun serverStarting(server: MinecraftServer) {
+        resourcePackTranslations = ResourcePackTranslations(FabricLoader.getInstance().configDir, ::logInfo, ::logWarn)
+        resourcePackTranslations.start()
         launch {
             bot = ExtensibleBot(config[BotSpec.token]) {
                 applicationCommands {
