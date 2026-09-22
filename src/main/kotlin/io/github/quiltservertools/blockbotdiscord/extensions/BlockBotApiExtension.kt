@@ -89,7 +89,12 @@ class BlockBotApiExtension : Extension(), Bot {
     )
     private val server: MinecraftServer by inject()
     private val mentions = AllowedMentionsBuilder()
-    private val packEmojis by lazy { DiscordPackEmojis(kord, ::logWarn, ::logInfo) }
+    private val packEmojis by lazy {
+        DiscordPackEmojis(
+            kord, ::logWarn, ::logInfo,
+            FabricLoader.getInstance().configDir.resolve("blockbot-resourcepack-cache/discord/${kord.selfId}/emoji-usage.json"),
+        )
+    }
 
     private fun launchWithPackEmojis(block: suspend () -> Unit) = BlockBotDiscord.launch {
         packEmojis.withMessage(block)

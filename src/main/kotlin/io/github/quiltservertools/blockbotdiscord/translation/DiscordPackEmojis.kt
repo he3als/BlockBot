@@ -12,6 +12,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import java.security.MessageDigest
+import java.nio.file.Path
 import java.util.Base64
 import java.util.HexFormat
 import java.util.concurrent.TimeUnit
@@ -31,8 +32,9 @@ internal class DiscordPackEmojis(
     private val delete: suspend (mention: String) -> Unit = { error("Emoji deletion is unavailable") },
     private val info: (String) -> Unit = {},
     private val capacity: Int = 2000,
+    private val usageStore: EmojiUsageStore? = null,
 ) {
-    constructor(kord: Kord, warn: (String) -> Unit, info: (String) -> Unit = {}) : this(
+    constructor(kord: Kord, warn: (String) -> Unit, info: (String) -> Unit = {}, usageFile: Path? = null) : this(
         list = {
             kord.rest.application.getApplicationEmojis(kord.selfId).items.associate {
                 it.name!! to "<:${it.name}:${it.id}>"
@@ -53,31 +55,48 @@ internal class DiscordPackEmojis(
             kord.rest.application.deleteApplicationEmoji(kord.selfId, id)
         },
         info = info,
+        usageStore = usageFile?.let { EmojiUsageStore(it, warn) },
     )
 
     private val mutex = Mutex()
+    private val messageMutex = Mutex()
     private var known: MutableMap<String, String>? = null
     private var refreshAfter = Long.MIN_VALUE
     private var retryAfter = Long.MIN_VALUE
     private var invalidPrefix: String? = null
     private var slotsUnavailable = false
-    private data class Usage(var count: Long = 0, var lastUse: Long = 0)
-    private val usage = mutableMapOf<String, Usage>()
+    private val usage = mutableMapOf<String, EmojiUsage>()
     private var useOrder = 0L
+    private var usageLoaded = false
+    private var usageDirty = false
     private val managedPrefixes = mutableSetOf<String>()
     private val pending = mutableMapOf<MessageScope, MutableSet<String>>()
 
     private class MessageScope(val owner: DiscordPackEmojis) : AbstractCoroutineContextElement(Key) {
+        val uses = mutableMapOf<String, Long>()
         companion object Key : CoroutineContext.Key<MessageScope>
     }
 
-    /** Keep rendered icons alive until the corresponding Discord send finishes. */
+    /** Complete eviction/upload before sending and serialize sends through Discord's response. */
     suspend fun <T> withMessage(block: suspend () -> T): T {
-        val scope = MessageScope(this)
-        return try {
-            withContext(scope) { block() }
-        } finally {
-            withContext(NonCancellable) { mutex.withLock { pending.remove(scope) } }
+        // Helpers may wrap a send already inside a message scope.
+        if (currentCoroutineContext()[MessageScope]?.owner === this) return block()
+        return messageMutex.withLock {
+            val scope = MessageScope(this)
+            var sent = false
+            try {
+                withContext(scope) { block() }.also { sent = true }
+            } finally {
+                withContext(NonCancellable) {
+                    mutex.withLock {
+                        if (sent) recordUsage(scope.uses)
+                        // Save before releasing the message queue. A subsequent
+                        // eviction observes the new counts, including after restart.
+                        saveUsage()
+                        pending.remove(scope)
+                    }
+                }
+            }
         }
     }
 
@@ -95,6 +114,7 @@ internal class DiscordPackEmojis(
         val replacements = mutableMapOf<Int, String>()
         val completed = withTimeoutOrNull(timeoutMillis) {
             mutex.withLock {
+                loadUsage()
                 val namePrefix = if (VALID_PREFIX.matches(prefix)) {
                     invalidPrefix = null
                     prefix
@@ -105,7 +125,7 @@ internal class DiscordPackEmojis(
                     }
                     DEFAULT_PREFIX
                 }
-                managedPrefixes.add(namePrefix)
+                if (managedPrefixes.add(namePrefix)) usageDirty = true
                 try {
                     // A message cannot trigger an entire pack's worth of uploads.
                     val icons = points.distinct().filter { glyphs[it]?.isNotEmpty() == true }
@@ -143,13 +163,6 @@ internal class DiscordPackEmojis(
                     }
                 } catch (_: Exception) {
                     failed()
-                } finally {
-                    // Count rendered occurrences during this server run. Ties
-                    // are broken by oldest use, then by name for unseen icons.
-                    for (point in points) replacements[point]?.let { mention ->
-                        val name = mention.substringAfter("<:").substringBeforeLast(':')
-                        usage.getOrPut(name) { Usage() }.apply { count++; lastUse = ++useOrder }
-                    }
                 }
             }
             true
@@ -164,22 +177,71 @@ internal class DiscordPackEmojis(
         // Emoji markup is much longer than a single glyph. Keep all ordinary
         // text and omit excess icons instead of overflowing Discord's limit.
         var remaining = maxLength - points.filterNot(ResourcePackGlyphs::isPrivateUse).sumOf(Character::charCount)
-        return buildString {
+        val uses = mutableMapOf<String, Long>()
+        val rendered = buildString {
             for (point in points) {
                 if (ResourcePackGlyphs.isPrivateUse(point)) {
                     val replacement = replacements[point].orEmpty()
                     if (replacement.length <= remaining) {
                         append(replacement)
                         remaining -= replacement.length
+                        if (replacement.isNotEmpty()) {
+                            val name = replacement.substringAfter("<:").substringBeforeLast(':')
+                            uses[name] = uses.getOrDefault(name, 0L) + 1
+                        }
                     }
                 } else appendCodePoint(point)
             }
         }.trim()
+        mutex.withLock {
+            if (scope != null) {
+                for ((name, count) in uses) scope.uses[name] = scope.uses.getOrDefault(name, 0L) + count
+            } else {
+                // Standalone rendering is useful for callers/tests without a send.
+                // Production relay paths always use withMessage to protect delivery.
+                recordUsage(uses)
+                saveUsage()
+            }
+        }
+        return rendered
+    }
+
+    private suspend fun loadUsage() {
+        if (usageLoaded) return
+        usageStore?.load()?.let { state ->
+            usage.putAll(state.emojis)
+            managedPrefixes.addAll(state.prefixes)
+            useOrder = state.sequence
+        }
+        usageLoaded = true
+    }
+
+    private fun recordUsage(uses: Map<String, Long>) {
+        for ((name, count) in uses) {
+            if (useOrder == Long.MAX_VALUE) {
+                // Keep persisted recency ordering valid even after a manually
+                // edited counter reaches the maximum representable value.
+                usage.entries.sortedBy { it.value.lastUse }.forEachIndexed { index, entry ->
+                    usage[entry.key] = entry.value.copy(lastUse = index + 1L)
+                }
+                useOrder = usage.size.toLong()
+            }
+            val previous = usage[name]?.count ?: 0L
+            usage[name] = EmojiUsage(previous + minOf(count, Long.MAX_VALUE - previous), ++useOrder)
+            usageDirty = true
+        }
+    }
+
+    private suspend fun saveUsage() {
+        if (!usageDirty || usageStore == null) return
+        if (usageStore.save(EmojiUsageState(sequence = useOrder, prefixes = managedPrefixes.toSet(), emojis = usage.toMap()))) {
+            usageDirty = false
+        }
     }
 
     private suspend fun refresh() {
         known = list().toMutableMap()
-        usage.keys.retainAll(known!!.keys)
+        if (usage.keys.retainAll(known!!.keys)) usageDirty = true
         refreshAfter = nanoTime() + TimeUnit.MINUTES.toNanos(5)
     }
 
@@ -210,9 +272,12 @@ internal class DiscordPackEmojis(
             .minWithOrNull(compareBy<String> { usage[it]?.count ?: 0L }
                 .thenBy { usage[it]?.lastUse ?: 0L }.thenBy { it })
             ?: throw NoManagedSlotException()
-        delete(known!!.getValue(victim))
-        known!!.remove(victim)
+        // Invalidate locally before the request: a timeout may mean Discord
+        // deleted it already. Never reuse that potentially stale ID afterward.
+        val mention = known!!.remove(victim)!!
+        delete(mention)
         usage.remove(victim)
+        usageDirty = true
         info("Removed least-used resource-pack Discord emoji to free a slot")
     }
 

@@ -157,14 +157,42 @@ The remote list is refreshed after five minutes of use.
 
 When the application's 2,000 slots are full (or Discord reports a full emoji
 inventory), BlockBot refreshes the inventory and replaces the **least frequently
-used managed emoji** on demand. Usage counts are rendered occurrences during
-the current server run; ties prefer the least recently used icon, then its name.
-Unused icons discovered at startup have a count of zero. Counts reset on restart.
-Only names matching a prefix used by BlockBot in this run plus its generated
-hash are eligible. Unrelated emoji are never deleted. Icons needed by the
-current message or another message still being sent are protected. If no
-eligible icon exists, the new glyph is omitted and subsequent messages can try
-again. Eviction is logged and the requested icon is uploaded immediately.
+used managed emoji** on demand. Counts include icon occurrences in successfully
+sent messages; failed/cancelled sends and icons omitted for length limits do not
+increase them. Ties prefer the least recently used icon, then its name. Unused
+icons discovered at startup have a count of zero.
+
+Counts, recency, and previously configured prefixes persist in:
+
+```text
+config/blockbot-resourcepack-cache/discord/<application-id>/emoji-usage.json
+```
+
+This versioned JSON contains `sequence`, `prefixes`, and an `emojis` object
+mapping generated names to `{ "count": N, "lastUse": N }`. It is independent
+of resource-pack hashes, so pack-cache pruning does not reset usage. After each
+successful emoji-enabled send, changed state is written on the I/O dispatcher
+to a temporary file, flushed, and atomically renamed. Failed writes retain the
+previous JSON and in-memory counts and retry with the next message. Missing or
+invalid JSON starts with empty counts; invalid input is logged. Files are
+bounded to 2 MiB. Entries are removed when their emoji is evicted or disappears
+from Discord's inventory. Counts and tie-breaking recency survive restarts.
+
+Emoji-enabled relay messages share a queue covering preparation **and the
+Discord send response**. Each replacement awaits deletion and successful
+upload before the message is sent. The next message waits until the previous
+send and usage update finish, so it cannot evict an icon between preparation
+and sending. Cancellation releases the queue and reservations. A failed or
+ambiguous deletion invalidates the old cached ID immediately so subsequent
+messages cannot reuse an ID which Discord might already have deleted.
+
+Only names matching a recorded BlockBot prefix plus its generated hash are
+eligible for eviction. Unrelated emoji are never deleted. Icons needed by the
+current message remain protected. If no eligible icon exists, the new glyph is
+omitted and subsequent messages can try again. Eviction is logged and the
+requested icon is uploaded immediately. These guarantees apply to one BlockBot
+instance; another bot process or administrator can independently change the
+application's emoji inventory.
 Deleting an emoji also removes its artwork from older Discord messages.
 
 Advancement descriptions containing glyphs move from the footer into the embed
@@ -197,6 +225,9 @@ Unicode code points, atlas cropping, cache reloads, concurrent upload reuse,
 API failure/cancellation, and actual Kord emoji creation and webhook payloads
 using mocked HTTP. Slot-limit tests cover least-used replacement, recency ties,
 unrelated emoji, messages still being sent, and Discord's full-inventory error.
+Persistence and concurrency tests cover restart counts/recency, atomic write
+failure, simultaneous increments, delayed deletion/upload/send responses,
+queue cancellation, and ambiguous deletion failures.
 Live rendering still needs verification against your pack and Discord server.
 
 ## Build and use

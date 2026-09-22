@@ -7,6 +7,7 @@ import dev.kord.core.cache.data.ChannelData
 import dev.kord.core.entity.channel.TextChannel
 import dev.kordex.core.utils.ensureWebhook
 import io.github.quiltservertools.blockbotdiscord.translation.DiscordPackEmojis
+import io.github.quiltservertools.blockbotdiscord.translation.EmojiUsageStore
 import io.github.quiltservertools.blockbotdiscord.translation.ResourcePackGlyphs
 import io.github.quiltservertools.blockbotdiscord.translation.advancementEmbed
 import io.github.quiltservertools.blockbotdiscord.translation.iconPack
@@ -107,14 +108,18 @@ class DiscordWebhookSetupTest {
             assertEquals("smoke", sent.content)
             assertEquals(1, sends)
             val glyphs = ResourcePackGlyphs.readPack(iconPack(directory))
-            val emojis = DiscordPackEmojis(kord, warn = { error(it) })
-            val embed = advancementEmbed("Sophed has made the advancement [The Warding Metal]", "\ue00f Silver",
-                "https://example.invalid/avatar.png") { emojis.render(it, glyphs) }
-            ready.execute("test-token") { embeds = mutableListOf(embed) }
+            val usageFile = directory.resolve("discord/123456789012345678/emoji-usage.json")
+            val emojis = DiscordPackEmojis(kord, warn = { error(it) }, usageFile = usageFile)
+            emojis.withMessage {
+                val embed = advancementEmbed("Sophed has made the advancement [The Warding Metal]", "\ue00f Silver",
+                    "https://example.invalid/avatar.png") { emojis.render(it, glyphs) }
+                ready.execute("test-token") { embeds = mutableListOf(embed) }
+            }
             assertEquals(1, emojiUploads)
             assertEquals(1, emojiDeletes)
             assertTrue(lastSend.contains("<:$emojiName:987> Silver"))
             assertTrue(!lastSend.contains("footer"))
+            assertEquals(1L, EmojiUsageStore(usageFile, warn = { error(it) }).load().emojis.getValue(emojiName).count)
             // Restarting the relay discovers and reuses the application-owned emoji.
             assertEquals("<:$emojiName:987> Silver", DiscordPackEmojis(kord, warn = { error(it) }).render("\ue00f Silver", glyphs))
             assertEquals(1, emojiUploads)
