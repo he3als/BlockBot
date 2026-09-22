@@ -33,6 +33,7 @@ import io.github.quiltservertools.blockbotapi.sender.PlayerMessageSender
 import io.github.quiltservertools.blockbotapi.sender.RelayMessageSender
 import io.github.quiltservertools.blockbotdiscord.BlockBotDiscord
 import io.github.quiltservertools.blockbotdiscord.MentionToMinecraftRenderer
+import io.github.quiltservertools.blockbotdiscord.logWarn
 import io.github.quiltservertools.blockbotdiscord.config.*
 import io.github.quiltservertools.blockbotdiscord.translation.withResourcePackTranslations
 import io.github.quiltservertools.blockbotdiscord.utility.*
@@ -91,12 +92,16 @@ class BlockBotApiExtension : Extension(), Bot {
         component.withResourcePackTranslations(BlockBotDiscord.resourcePackTranslations.translations).string
 
     override suspend fun setup() {
-        val channel = config.getChannel(Channels.CHAT, bot)
-
-        chatWebhook = ensureWebhook(channel as TopGuildMessageChannel, config[ChatRelaySpec.WebhookSpec.webhookName])
+        val (webhook, roleIds) = retryDiscordSetup(::logWarn) {
+            val channel = config.getChannel(Channels.CHAT, bot)
+            // On a retry, ensureWebhook first looks up an existing webhook.
+            val webhook = ensureWebhook(channel as TopGuildMessageChannel, config[ChatRelaySpec.WebhookSpec.webhookName])
+            val roleIds = config.getGuild(bot).roles.filter { it.mentionable }.map { it.id }.toList()
+            webhook to roleIds
+        }
+        chatWebhook = webhook
         mentions.add(AllowedMentionType.UserMentions)
-        mentions.roles.addAll(config.getGuild(bot).roles.filter { it.mentionable }.map { it.id }
-            .toList())
+        mentions.roles.addAll(roleIds)
 
         event<MessageCreateEvent> {
             check { isNotBot() }

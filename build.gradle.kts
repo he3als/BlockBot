@@ -93,6 +93,9 @@ allprojects {
 
 repositories {
     mavenCentral()
+    maven("https://snapshots.kord.dev") {
+        content { includeGroup("dev.kord") }
+    }
     maven("https://maven.nucleoid.xyz/")
     maven("https://snapshots-repo.kordex.dev")
 //    maven("https://repo.kord.dev/snapshots")
@@ -112,12 +115,15 @@ dependencies {
     shadow(libs.adventure.gson)
 
     shadow(libs.kord.extensions)
+    // Align Kord modules with the upstream nullable channel-ID fix.
+    shadow(libs.kord.core.voice)
     shadow(libs.emoji)
 
     shadow(libs.konf.base)
     shadow(libs.konf.toml)
 
     testImplementation(kotlin("test-junit5"))
+    testImplementation("io.ktor:ktor-client-mock:3.4.0")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 
     implementation("com.ibm.icu:icu4j:74.2")
@@ -165,6 +171,9 @@ publishMods {
 tasks {
     test {
         useJUnitPlatform()
+        // Minecraft bootstrap writes logs; keep test artifacts out of the checkout.
+        workingDir = layout.buildDirectory.dir("test-run").get().asFile
+        doFirst { workingDir.mkdirs() }
     }
 
     jar {

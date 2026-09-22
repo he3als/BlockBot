@@ -33,7 +33,7 @@ class ResourcePackTranslationsTest {
     }
 
     @Test
-    fun `missing or blank vanilla resource pack settings retain existing behavior silently`() {
+    fun `missing or blank resource pack settings are reported without repeated messages`() {
         val service = service { _, _ -> error("Must not download") }
         service.checkForUpdates()
         for (properties in listOf(
@@ -47,19 +47,84 @@ class ResourcePackTranslationsTest {
         }
         assertTrue(service.translations.isEmpty())
         assertTrue(warnings.isEmpty())
-        assertTrue(logs.isEmpty())
+        assertTrue(logs.all { it.contains("inactive") })
+        val count = logs.size
+        service.checkForUpdates()
+        assertEquals(count, logs.size)
+    }
+
+    private fun advertiseBetter(pack: Path, hash: String = sha1(pack)) {
+        val bsp = Files.createDirectories(directory.resolve("betterserverpacks"))
+        Files.writeString(bsp.resolve("config.properties"), "url=https://example.invalid/better.zip\n")
+        Files.writeString(bsp.resolve("pack.sha1"), hash)
     }
 
     @Test
-    fun `Better Server Packs files do not supply a resource pack`() {
-        val bsp = Files.createDirectories(directory.resolve("betterserverpacks"))
-        Files.writeString(bsp.resolve("config.properties"), "url=https://example.invalid/pack.zip\n")
-        Files.writeString(bsp.resolve("pack.sha1"), "0".repeat(40))
-        val service = service { _, _ -> error("Must not download") }
+    fun `Better Server Packs has priority when both sources are configured`() {
+        val vanilla = packOf(directory, "en_us" to """{"key":"Vanilla"}""")
+        val better = packOf(directory, "en_us" to """{"key":"Better"}""")
+        advertise(vanilla)
+        advertiseBetter(better)
+        val service = service { uri, destination ->
+            assertEquals("/better.zip", uri.path)
+            Files.copy(better, destination, REPLACE_EXISTING)
+        }
         service.checkForUpdates()
-        assertTrue(service.translations.isEmpty())
+        assertEquals("Better", service.translations["key"])
+        assertTrue(logs.any { it.contains("Using Better Server Packs") })
         assertTrue(warnings.isEmpty())
-        assertTrue(logs.isEmpty())
+    }
+
+    @Test
+    fun `Better Server Packs works alone and follows hash changes`() {
+        var pack = packOf(directory, "en_us" to """{"key":"Old"}""")
+        advertiseBetter(pack)
+        val service = service { _, destination -> Files.copy(pack, destination, REPLACE_EXISTING) }
+        service.checkForUpdates()
+        assertEquals("Old", service.translations["key"])
+        pack = packOf(directory, "en_gb" to """{"key":"New"}""")
+        advertiseBetter(pack)
+        service.checkForUpdates()
+        assertEquals("New", service.translations["key"])
+        assertTrue(warnings.isEmpty())
+    }
+
+    @Test
+    fun `clearing Better Server Packs URL selects vanilla source`() {
+        val vanilla = packOf(directory, "en_us" to """{"key":"Vanilla"}""")
+        val better = packOf(directory, "en_us" to """{"key":"Better"}""")
+        advertise(vanilla)
+        advertiseBetter(better)
+        val service = service { uri, destination ->
+            Files.copy(if (uri.path == "/better.zip") better else vanilla, destination, REPLACE_EXISTING)
+        }
+        service.checkForUpdates()
+        Files.writeString(directory.resolve("betterserverpacks/config.properties"), "url=\n")
+        service.checkForUpdates()
+        assertEquals("Vanilla", service.translations["key"])
+    }
+
+    @Test
+    fun `configured Better Server Packs with missing or incorrect hash retains previous map`() {
+        val pack = packOf(directory, "en_us" to """{"key":"Known good"}""")
+        advertise(pack)
+        var downloads = 0
+        val service = service { _, destination ->
+            downloads++
+            Files.copy(pack, destination, REPLACE_EXISTING)
+        }
+        service.checkForUpdates()
+        val previous = service.translations
+        advertiseBetter(pack)
+        Files.delete(directory.resolve("betterserverpacks/pack.sha1"))
+        service.checkForUpdates()
+        assertSame(previous, service.translations)
+        assertEquals(1, downloads)
+        advertiseBetter(pack, "0".repeat(40))
+        service.checkForUpdates()
+        assertSame(previous, service.translations)
+        assertEquals(2, downloads)
+        assertEquals(2, warnings.size)
     }
 
     @Test
@@ -69,7 +134,7 @@ class ResourcePackTranslationsTest {
         val service = service { _, _ -> error("Must not download") }
         service.checkForUpdates()
         assertTrue(service.translations.isEmpty())
-        assertTrue(warnings.single().contains("Invalid resource-pack-sha1"))
+        assertTrue(warnings.single().contains("Invalid resource-pack SHA-1"))
     }
 
     @Test

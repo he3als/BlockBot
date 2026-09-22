@@ -10,6 +10,8 @@ fabric-kotlin = "1.13.11+kotlin.2.3.21"
 
 # Discord
 kord-extensions = "2.4.1-SNAPSHOT"
+# Includes kordlib/kord#1072 (Discord channel application_id may be null).
+kord = "0.19.0-SNAPSHOT"
 mc-discord-reserializer = "4.3.0"
 emoji-java = "5.1.1"
 adventure-gson = "5.1.1"
@@ -27,6 +29,7 @@ fabric-api = { module = "net.fabricmc.fabric-api:fabric-api", version.ref = "fab
 fabric-kotlin = { module = "net.fabricmc:fabric-language-kotlin", version.ref = "fabric-kotlin" }
 
 kord-extensions = { module = "dev.kordex:kord-extensions", version.ref = "kord-extensions" }
+kord-core-voice = { module = "dev.kord:kord-core-voice", version.ref = "kord" }
 emoji = { module = "com.vdurmont:emoji-java", version.ref = "emoji-java"}
 mcDiscordReserializer = { module = "dev.vankka:mcdiscordreserializer", version.ref = "mc-discord-reserializer"}
 adventure-gson = { module = "net.kyori:adventure-text-serializer-gson", version.ref = "adventure-gson"}

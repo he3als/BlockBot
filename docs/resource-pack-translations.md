@@ -1,12 +1,23 @@
 # Server resource-pack translations
 
-BlockBot reads the vanilla `resource-pack` URL and `resource-pack-sha1` hash
-from `server.properties` in the server's game directory. No additional BlockBot
-configuration is required. Both properties must be set so downloads can be
-verified. Missing files or blank URL/hash settings leave normal Minecraft
-translations in place. SHA-1 hex is accepted in either case and normalized to
-lowercase for cache keys. Properties use vanilla's UTF-8 decoding with legacy
-ISO-8859-1 fallback. Better Server Packs configuration files are not read.
+BlockBot automatically selects one server resource-pack source:
+
+1. **Better Server Packs:** `url` in
+   `config/betterserverpacks/config.properties`, with SHA-1 from
+   `config/betterserverpacks/pack.sha1`.
+2. **Vanilla:** `resource-pack` and `resource-pack-sha1` in `server.properties`
+   in the server's game directory, when Better Server Packs has no URL set.
+
+Better Server Packs takes priority when both are configured. Once its URL is
+set, a missing/invalid hash or failed download retains the previous map;
+BlockBot does not switch to a potentially different vanilla pack. Clear the
+Better Server Packs URL to select vanilla instead. No extra BlockBot
+configuration or Better Server Packs dependency is required.
+
+Both URL and SHA-1 are required for verification. SHA-1 hex is accepted in
+either case and normalized to lowercase for cache keys. Properties use UTF-8
+decoding with legacy ISO-8859-1 fallback. Source selection or missing settings
+are logged on startup and when they change, without repeating every check.
 
 This applies to Discord chat serialization, advancement titles and descriptions,
 and death messages. It does not change Minecraft's global language, resource
@@ -45,7 +56,7 @@ flattened to plain text.
 
 ## Updates and cache
 
-A single daemon worker reads `server.properties` immediately at
+A single daemon worker checks both source configurations immediately at
 server startup, then every 30 seconds after the previous check completes. All
 file I/O, networking, hashing, and parsing run on that worker. It is interrupted
 when the server stops.
@@ -71,8 +82,8 @@ the ZIP is not retained. A corrupt cache triggers a new verified download.
 
 Only a complete successful update replaces the immutable active map through a
 volatile reference. The previous map stays available during downloads and after
-failures. The source is checked again before activation so another edit to
-`server.properties` during a download cannot activate an obsolete candidate.
+failures. The source is checked again before activation so another configuration
+or hash change during a download cannot activate an obsolete candidate.
 Failed updates retry after five minutes; a different hash or URL can retry
 sooner. Missing or cleared resource-pack settings after loading a map retain
 that last good map until restart. Initial startup uses vanilla lookup until
@@ -80,7 +91,8 @@ the first cache load or download completes.
 
 Malformed JSON or a corrupt matching ZIP entry rejects the entire candidate
 without crashing the server or publishing partial translations. Logs omit URLs
-and pack contents. Unchanged checks are silent.
+and pack contents. Unchanged checks are silent. An empty English map is reported
+so a pack with no matching language files is distinguishable from a cache miss.
 
 ## Limits
 
@@ -93,7 +105,7 @@ and pack contents. Unchanged checks are silent.
 - 4 MiB per English language file, 32 MiB total uncompressed English JSON,
   200,000 effective keys, and 64 MiB cached JSON.
 - 1,024 characters per key and 32,768 characters per value.
-- 64 KiB for `server.properties`.
+- 64 KiB per properties file and 128 bytes for `pack.sha1`.
 
 Entries are read directly from the ZIP and never extracted. Traversal paths are
 excluded. Cache publication requires the filesystem to support atomic renames
@@ -111,8 +123,8 @@ bash gradlew clean build --console=plain
 Use `build/libs/blockbot-discord-2.0.9+26.2.jar`. Stop the server, replace the
 existing BlockBot jar in `mods/` with this jar, retain the required Fabric API
 and Fabric Language Kotlin mods, and restart. Keep the usual BlockBot
-bot/channel configuration, and set `resource-pack` and `resource-pack-sha1` in
-`server.properties`. No client mod is needed.
+bot/channel configuration. Configure Better Server Packs, or set `resource-pack`
+and `resource-pack-sha1` in `server.properties`. No client mod is needed.
 
 To run the focused tests:
 
@@ -136,10 +148,32 @@ Sophed has made the advancement [Light a Campfire]
 ```
 
 The description should be `Light a campfire for the first time`. Also check a
-vanilla advancement such as Stone Age. After updating the hosted pack, update
+vanilla advancement such as Stone Age. With Better Server Packs, run
+`/pack reload` after updating the hosted pack. With vanilla settings, update
 `resource-pack-sha1` (and `resource-pack` if the URL changed) in
 `server.properties`. Within the next poll plus download time, BlockBot should
 log the new hash and load the new translations. This polling updates BlockBot;
 it does not reload vanilla's client resource-pack settings, which normally
 require a server restart. Restarting with the same hash should log
 `Using cached resource-pack translations` without fetching the pack.
+
+This translates Discord messages and embeds. Minecraft's own server log can
+still show custom translation keys, since its global language is unchanged.
+
+## Discord startup compatibility
+
+Kord 0.19.0-SNAPSHOT includes the upstream fix for Discord's nullable channel
+`application_id` field
+([kordlib/kord#1072](https://github.com/kordlib/kord/pull/1072)).
+Kord modules are aligned through the direct core-voice dependency. Tests decode
+absent, null, and populated IDs, including a GUILD_CREATE dispatch. A mock HTTP
+test exercises KordEx webhook setup, recovery from a 503, webhook reuse, and
+sending a message with the updated Kord dependency, without contacting Discord.
+
+Relay setup retries HTTP 5xx and network failures up to four times, waiting
+1, 2, 4, and 8 seconds. Retries happen before event-handler registration and
+recheck for an existing webhook; message sends are not retried. Authentication
+and permission errors are not retried. If setup still fails, the extension is
+not registered with Minecraft's relay API as though it were ready. A persistent
+Discord outage or invalid configuration still needs to be resolved before
+restarting the bot/server.

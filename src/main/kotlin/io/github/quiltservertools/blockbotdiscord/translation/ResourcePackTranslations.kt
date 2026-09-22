@@ -23,13 +23,15 @@ internal class ResourcePackTranslations(
     private val download: (URI, Path) -> Unit = ResourcePackDownload::download,
     private val nanoTime: () -> Long = System::nanoTime,
 ) : AutoCloseable {
-    private data class Source(val hash: String, val url: URI)
+    private data class Source(val hash: String, val url: URI, val origin: String)
     private data class Snapshot(val hash: String?, val translations: Map<String, String>)
 
     @Volatile
     private var active = Snapshot(null, emptyMap())
     val translations: Map<String, String> get() = active.translations
 
+    private val betterPacksDirectory = configDirectory.resolve("betterserverpacks")
+    private var sourceStatus: String? = null
     private val cacheDirectory = configDirectory.resolve("blockbot-resourcepack-cache/v1")
     private var executor: ScheduledExecutorService? = null
     private var observedHash: String? = null
@@ -60,12 +62,13 @@ internal class ResourcePackTranslations(
                 observedHash = source.hash
             }
             val values = load(source)
-            // server.properties may have changed again during the download.
+            // The selected source may have changed again during the download.
             if (Thread.currentThread().isInterrupted || readSource() != source) return
             active = Snapshot(source.hash, java.util.Map.copyOf(values))
             failedSource = null
             retryAfter = Long.MIN_VALUE
             info("Loaded ${values.size} translations from server resource pack")
+            if (values.isEmpty()) warn("No English translations found in server resource pack")
             pruneCache()
         } catch (exception: Exception) {
             if (Thread.currentThread().isInterrupted) return
@@ -81,27 +84,57 @@ internal class ResourcePackTranslations(
     }
 
     private fun readSource(): Source? {
-        if (!Files.exists(serverPropertiesFile)) return null
-        val properties = Properties().apply {
-            Files.newInputStream(serverPropertiesFile).use { input ->
-                val bytes = input.readNBytes(64 * 1024 + 1)
-                if (bytes.size > 64 * 1024) throw PackTranslationException("server.properties is too large")
-                // Match vanilla's UTF-8 decoding with legacy ISO-8859-1 fallback.
-                val contents = try {
-                    bytes.decodeToString(throwOnInvalidSequence = true)
-                } catch (_: CharacterCodingException) {
-                    bytes.toString(Charsets.ISO_8859_1)
+        val betterProperties = betterPacksDirectory.resolve("config.properties")
+        if (Files.exists(betterProperties)) {
+            val url = readProperties(betterProperties).getProperty("url")?.trim().orEmpty()
+            if (url.isNotEmpty()) {
+                reportSource("Using Better Server Packs for resource-pack translations")
+                val hashFile = betterPacksDirectory.resolve("pack.sha1")
+                if (!Files.exists(hashFile)) {
+                    throw PackTranslationException("Better Server Packs pack.sha1 is missing; run /pack reload")
                 }
-                load(contents.reader())
+                val bytes = Files.newInputStream(hashFile).use { it.readNBytes(129) }
+                if (bytes.size > 128) throw PackTranslationException("Better Server Packs pack.sha1 is too large")
+                return source(url, bytes.toString(Charsets.US_ASCII).trim(), "Better Server Packs")
             }
         }
-        val url = properties.getProperty("resource-pack")?.trim()?.takeIf { it.isNotEmpty() } ?: return null
-        val hash = properties.getProperty("resource-pack-sha1")?.trim()?.lowercase()
-            ?.takeIf { it.isNotEmpty() } ?: return null
-        if (!HASH.matches(hash)) throw PackTranslationException("Invalid resource-pack-sha1 in server.properties")
+        val properties = if (Files.exists(serverPropertiesFile)) readProperties(serverPropertiesFile) else Properties()
+        val url = properties.getProperty("resource-pack")?.trim().orEmpty()
+        val hash = properties.getProperty("resource-pack-sha1")?.trim().orEmpty()
+        if (url.isEmpty() || hash.isEmpty()) {
+            val reason = if (url.isEmpty()) "no resource-pack URL configured" else "resource-pack-sha1 is missing"
+            reportSource("Resource-pack translations inactive: $reason; retaining existing translations")
+            return null
+        }
+        reportSource("Using server.properties for resource-pack translations")
+        return source(url, hash, "server.properties")
+    }
+
+    private fun source(url: String, hash: String, origin: String): Source {
+        val normalizedHash = hash.lowercase()
+        if (!HASH.matches(normalizedHash)) throw PackTranslationException("Invalid resource-pack SHA-1 in $origin")
         val uri = URI(url)
         ResourcePackDownload.validateUrl(uri)
-        return Source(hash, uri)
+        return Source(normalizedHash, uri, origin)
+    }
+
+    private fun reportSource(status: String) {
+        if (status != sourceStatus) {
+            info(status)
+            sourceStatus = status
+        }
+    }
+
+    private fun readProperties(path: Path): Properties {
+        val bytes = Files.newInputStream(path).use { it.readNBytes(64 * 1024 + 1) }
+        if (bytes.size > 64 * 1024) throw PackTranslationException("Resource-pack properties file is too large")
+        // Match vanilla's UTF-8 decoding with legacy ISO-8859-1 fallback.
+        val contents = try {
+            bytes.decodeToString(throwOnInvalidSequence = true)
+        } catch (_: CharacterCodingException) {
+            bytes.toString(Charsets.ISO_8859_1)
+        }
+        return Properties().apply { load(contents.reader()) }
     }
 
     private fun load(source: Source): Map<String, String> {

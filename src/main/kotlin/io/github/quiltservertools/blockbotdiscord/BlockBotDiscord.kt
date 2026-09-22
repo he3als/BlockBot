@@ -108,7 +108,12 @@ object BlockBotDiscord : ModInitializer, CoroutineScope {
                     }
                 }
             }
-            BlockBotApi.registerBot(bot.findExtension())
+            val relay = bot.findExtension<BlockBotApiExtension>()
+            if (relay?.loaded == true) {
+                BlockBotApi.registerBot(relay)
+            } else {
+                logger.error("Discord relay extension failed to load; Minecraft relay callbacks were not registered")
+            }
 
             bot.start()
         }
