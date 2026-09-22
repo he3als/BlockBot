@@ -1,10 +1,12 @@
 # Server resource-pack translations
 
-BlockBot reads Better Server Packs' `url` from
-`config/betterserverpacks/config.properties` and its active lowercase SHA-1 from
-`config/betterserverpacks/pack.sha1`. No additional BlockBot configuration or
-Better Server Packs dependency is required. `server.properties` is not used.
-Missing files or an empty URL leave normal Minecraft translations in place.
+BlockBot reads the vanilla `resource-pack` URL and `resource-pack-sha1` hash
+from `server.properties` in the server's game directory. No additional BlockBot
+configuration is required. Both properties must be set so downloads can be
+verified. Missing files or blank URL/hash settings leave normal Minecraft
+translations in place. SHA-1 hex is accepted in either case and normalized to
+lowercase for cache keys. Properties use vanilla's UTF-8 decoding with legacy
+ISO-8859-1 fallback. Better Server Packs configuration files are not read.
 
 This applies to Discord chat serialization, advancement titles and descriptions,
 and death messages. It does not change Minecraft's global language, resource
@@ -43,7 +45,7 @@ flattened to plain text.
 
 ## Updates and cache
 
-A single daemon worker checks the local configuration and hash immediately at
+A single daemon worker reads `server.properties` immediately at
 server startup, then every 30 seconds after the previous check completes. All
 file I/O, networking, hashing, and parsing run on that worker. It is interrupted
 when the server stops.
@@ -60,8 +62,7 @@ all fallback locales and namespaces. `v1` versions the cache's merge rules.
 The three most recently used hashes are retained; older entries are removed
 after a successful activation. Cached maps are read without downloading the ZIP
 and survive server restarts. The cache can be deleted while the server is
-stopped to
-force a verified download next time.
+stopped to force a verified download next time.
 
 On a cache miss, BlockBot downloads to a temporary file, verifies SHA-1, reads
 the ZIP, and parses all matching language files before atomically renaming a
@@ -70,12 +71,12 @@ the ZIP is not retained. A corrupt cache triggers a new verified download.
 
 Only a complete successful update replaces the immutable active map through a
 volatile reference. The previous map stays available during downloads and after
-failures. The source is checked again before activation so a second `/pack
-reload` during a download cannot activate an obsolete candidate. Failed updates
-retry after five minutes; a different advertised hash or URL can retry sooner.
-An absent/disabled Better Server Packs configuration after loading a map also
-retains that last good map until restart. Initial startup uses vanilla lookup
-until the first cache load or download completes.
+failures. The source is checked again before activation so another edit to
+`server.properties` during a download cannot activate an obsolete candidate.
+Failed updates retry after five minutes; a different hash or URL can retry
+sooner. Missing or cleared resource-pack settings after loading a map retain
+that last good map until restart. Initial startup uses vanilla lookup until
+the first cache load or download completes.
 
 Malformed JSON or a corrupt matching ZIP entry rejects the entire candidate
 without crashing the server or publishing partial translations. Logs omit URLs
@@ -92,6 +93,7 @@ and pack contents. Unchanged checks are silent.
 - 4 MiB per English language file, 32 MiB total uncompressed English JSON,
   200,000 effective keys, and 64 MiB cached JSON.
 - 1,024 characters per key and 32,768 characters per value.
+- 64 KiB for `server.properties`.
 
 Entries are read directly from the ZIP and never extracted. Traversal paths are
 excluded. Cache publication requires the filesystem to support atomic renames
@@ -109,8 +111,8 @@ bash gradlew clean build --console=plain
 Use `build/libs/blockbot-discord-2.0.9+26.2.jar`. Stop the server, replace the
 existing BlockBot jar in `mods/` with this jar, retain the required Fabric API
 and Fabric Language Kotlin mods, and restart. Keep the usual BlockBot
-bot/channel configuration and Better Server Packs configuration. No client mod
-is needed.
+bot/channel configuration, and set `resource-pack` and `resource-pack-sha1` in
+`server.properties`. No client mod is needed.
 
 To run the focused tests:
 
@@ -134,7 +136,10 @@ Sophed has made the advancement [Light a Campfire]
 ```
 
 The description should be `Light a campfire for the first time`. Also check a
-vanilla advancement such as Stone Age. After updating the hosted pack, run
-`/pack reload`; within the next poll plus download time, BlockBot should log the
-new hash and load the new translations. Restarting with the same hash should log
+vanilla advancement such as Stone Age. After updating the hosted pack, update
+`resource-pack-sha1` (and `resource-pack` if the URL changed) in
+`server.properties`. Within the next poll plus download time, BlockBot should
+log the new hash and load the new translations. This polling updates BlockBot;
+it does not reload vanilla's client resource-pack settings, which normally
+require a server restart. Restarting with the same hash should log
 `Using cached resource-pack translations` without fetching the pack.

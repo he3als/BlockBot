@@ -67,7 +67,12 @@ object BlockBotDiscord : ModInitializer, CoroutineScope {
     }
 
     private fun serverStarting(server: MinecraftServer) {
-        resourcePackTranslations = ResourcePackTranslations(FabricLoader.getInstance().configDir, ::logInfo, ::logWarn)
+        resourcePackTranslations = ResourcePackTranslations(
+            FabricLoader.getInstance().configDir,
+            FabricLoader.getInstance().gameDir.resolve("server.properties"),
+            ::logInfo,
+            ::logWarn,
+        )
         resourcePackTranslations.start()
         launch {
             bot = ExtensibleBot(config[BotSpec.token]) {

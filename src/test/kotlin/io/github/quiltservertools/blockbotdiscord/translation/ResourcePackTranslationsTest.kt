@@ -23,27 +23,76 @@ class ResourcePackTranslationsTest {
     lateinit var directory: Path
     private val warnings = mutableListOf<String>()
     private val logs = mutableListOf<String>()
+    private val serverPropertiesFile: Path get() = directory.resolve("server.properties")
 
     private fun service(download: (URI, Path) -> Unit) =
-        ResourcePackTranslations(directory, logs::add, warnings::add, download)
+        ResourcePackTranslations(directory, serverPropertiesFile, logs::add, warnings::add, download)
 
     private fun advertise(pack: Path, hash: String = sha1(pack)) {
-        val bsp = Files.createDirectories(directory.resolve("betterserverpacks"))
-        Files.writeString(bsp.resolve("config.properties"), "url=https\\://example.invalid/pack.zip\n")
-        Files.writeString(bsp.resolve("pack.sha1"), "$hash\n")
+        Files.writeString(serverPropertiesFile, "resource-pack=https\\://example.invalid/pack.zip\nresource-pack-sha1=$hash\n")
     }
 
     @Test
-    fun `missing or unconfigured Better Server Packs retains existing behavior silently`() {
+    fun `missing or blank vanilla resource pack settings retain existing behavior silently`() {
         val service = service { _, _ -> error("Must not download") }
         service.checkForUpdates()
+        for (properties in listOf(
+            "motd=No resource pack\n",
+            "resource-pack=\nresource-pack-sha1=invalid\n",
+            "resource-pack=https://example.invalid/pack.zip\n",
+            "resource-pack=https://example.invalid/pack.zip\nresource-pack-sha1=\n",
+        )) {
+            Files.writeString(serverPropertiesFile, properties)
+            service.checkForUpdates()
+        }
+        assertTrue(service.translations.isEmpty())
+        assertTrue(warnings.isEmpty())
+        assertTrue(logs.isEmpty())
+    }
+
+    @Test
+    fun `Better Server Packs files do not supply a resource pack`() {
         val bsp = Files.createDirectories(directory.resolve("betterserverpacks"))
-        Files.writeString(bsp.resolve("config.properties"), "url=\n")
-        Files.writeString(bsp.resolve("pack.sha1"), "invalid")
+        Files.writeString(bsp.resolve("config.properties"), "url=https://example.invalid/pack.zip\n")
+        Files.writeString(bsp.resolve("pack.sha1"), "0".repeat(40))
+        val service = service { _, _ -> error("Must not download") }
         service.checkForUpdates()
         assertTrue(service.translations.isEmpty())
         assertTrue(warnings.isEmpty())
         assertTrue(logs.isEmpty())
+    }
+
+    @Test
+    fun `invalid vanilla SHA-1 is rejected before downloading`() {
+        val pack = packOf(directory, "en_us" to "{}")
+        advertise(pack, "invalid")
+        val service = service { _, _ -> error("Must not download") }
+        service.checkForUpdates()
+        assertTrue(service.translations.isEmpty())
+        assertTrue(warnings.single().contains("Invalid resource-pack-sha1"))
+    }
+
+    @Test
+    fun `vanilla properties decode escaped UTF-8 and legacy URLs and normalize hashes`() {
+        val pack = packOf(directory, "en_us" to """{"key":"Valid"}""")
+        val expected = "https://example.invalid/päck.zip?signature=ok"
+        for (charset in listOf(Charsets.UTF_8, Charsets.ISO_8859_1)) {
+            val properties = "resource-pack=https\\://example.invalid/päck.zip?signature\\=ok\nresource-pack-sha1=${sha1(pack).uppercase()}\n"
+            Files.write(serverPropertiesFile, properties.toByteArray(charset))
+            var downloads = 0
+            val service = service { uri, destination ->
+                assertEquals(expected, uri.toString())
+                downloads++
+                Files.copy(pack, destination, REPLACE_EXISTING)
+            }
+            service.checkForUpdates()
+            assertEquals(1, downloads)
+            assertEquals("Valid", service.translations["key"])
+            val cache = directory.resolve("blockbot-resourcepack-cache/v1/${sha1(pack)}/english-translations.json")
+            assertTrue(Files.exists(cache))
+            Files.delete(cache)
+        }
+        assertTrue(warnings.isEmpty())
     }
 
     @Test
@@ -115,7 +164,7 @@ class ResourcePackTranslationsTest {
         advertise(pack)
         var now = 0L
         var downloads = 0
-        val service = ResourcePackTranslations(directory, logs::add, warnings::add, { _, destination ->
+        val service = ResourcePackTranslations(directory, serverPropertiesFile, logs::add, warnings::add, { _, destination ->
             if (++downloads == 1) throw IOException("https://secret.invalid/?token=secret")
             Files.copy(pack, destination, REPLACE_EXISTING)
         }, { now })

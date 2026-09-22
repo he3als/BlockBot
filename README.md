@@ -26,8 +26,8 @@ guild =
 A full list of options can be found in the [configuration file](src/main/resources/blockbot-discord.toml).
 
 BlockBot automatically loads English server resource-pack translations when
-[Better Server Packs](https://github.com/Fisch37/better-server-packs-fabric) is
-configured. See [resource-pack translations](docs/resource-pack-translations.md)
+`resource-pack` and `resource-pack-sha1` are set in `server.properties`.
+See [resource-pack translations](docs/resource-pack-translations.md)
 for fallback rules, caching, limits, and build instructions.
 
 ## License

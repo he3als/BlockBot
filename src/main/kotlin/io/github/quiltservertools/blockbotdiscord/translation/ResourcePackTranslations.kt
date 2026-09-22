@@ -2,6 +2,7 @@ package io.github.quiltservertools.blockbotdiscord.translation
 
 import com.google.gson.Gson
 import java.net.URI
+import java.nio.charset.CharacterCodingException
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption.ATOMIC_MOVE
@@ -15,7 +16,8 @@ import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
 
 internal class ResourcePackTranslations(
-    private val configDirectory: Path,
+    configDirectory: Path,
+    private val serverPropertiesFile: Path,
     private val info: (String) -> Unit,
     private val warn: (String) -> Unit,
     private val download: (URI, Path) -> Unit = ResourcePackDownload::download,
@@ -28,7 +30,6 @@ internal class ResourcePackTranslations(
     private var active = Snapshot(null, emptyMap())
     val translations: Map<String, String> get() = active.translations
 
-    private val packDirectory = configDirectory.resolve("betterserverpacks")
     private val cacheDirectory = configDirectory.resolve("blockbot-resourcepack-cache/v1")
     private var executor: ScheduledExecutorService? = null
     private var observedHash: String? = null
@@ -59,7 +60,7 @@ internal class ResourcePackTranslations(
                 observedHash = source.hash
             }
             val values = load(source)
-            // /pack reload may have run again while this pack was downloading.
+            // server.properties may have changed again during the download.
             if (Thread.currentThread().isInterrupted || readSource() != source) return
             active = Snapshot(source.hash, java.util.Map.copyOf(values))
             failedSource = null
@@ -80,23 +81,24 @@ internal class ResourcePackTranslations(
     }
 
     private fun readSource(): Source? {
-        val propertiesFile = packDirectory.resolve("config.properties")
-        val hashFile = packDirectory.resolve("pack.sha1")
-        if (!Files.exists(propertiesFile) || !Files.exists(hashFile)) return null
+        if (!Files.exists(serverPropertiesFile)) return null
         val properties = Properties().apply {
-            Files.newInputStream(propertiesFile).use { input ->
+            Files.newInputStream(serverPropertiesFile).use { input ->
                 val bytes = input.readNBytes(64 * 1024 + 1)
-                if (bytes.size > 64 * 1024) throw PackTranslationException("Better Server Packs config is too large")
-                load(bytes.inputStream())
+                if (bytes.size > 64 * 1024) throw PackTranslationException("server.properties is too large")
+                // Match vanilla's UTF-8 decoding with legacy ISO-8859-1 fallback.
+                val contents = try {
+                    bytes.decodeToString(throwOnInvalidSequence = true)
+                } catch (_: CharacterCodingException) {
+                    bytes.toString(Charsets.ISO_8859_1)
+                }
+                load(contents.reader())
             }
         }
-        val url = properties.getProperty("url")?.trim()?.takeIf { it.isNotEmpty() } ?: return null
-        val hash = Files.newInputStream(hashFile).use {
-            val bytes = it.readNBytes(129)
-            if (bytes.size > 128) throw PackTranslationException("Invalid Better Server Packs SHA-1")
-            bytes.toString(Charsets.US_ASCII).trim()
-        }
-        if (!HASH.matches(hash)) throw PackTranslationException("Invalid Better Server Packs SHA-1")
+        val url = properties.getProperty("resource-pack")?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        val hash = properties.getProperty("resource-pack-sha1")?.trim()?.lowercase()
+            ?.takeIf { it.isNotEmpty() } ?: return null
+        if (!HASH.matches(hash)) throw PackTranslationException("Invalid resource-pack-sha1 in server.properties")
         val uri = URI(url)
         ResourcePackDownload.validateUrl(uri)
         return Source(hash, uri)
