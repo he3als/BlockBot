@@ -16,21 +16,48 @@ import java.util.zip.CRC32
 import java.util.zip.ZipFile
 import javax.imageio.ImageIO
 import javax.imageio.stream.MemoryCacheImageInputStream
+import kotlin.math.roundToInt
 
 /** Bitmap icons in the default font, including references to fonts in other namespaces. */
 internal object ResourcePackGlyphs {
+    // gg sans capHeight/unitsPerEm = 690/1000. Embed text is 14px, emoji 18px.
+    // 100 * (1 - (14 * 0.69 / 18)) / 2; see docs/resource-pack-translations.md.
+    const val DEFAULT_PADDING = 23.1667
     private const val MAX_GLYPHS = 512
     private const val MAX_PNG_BYTES = 128 * 1024
     private val resourceId = Regex("(?:([a-z0-9_.-]+):)?([a-z0-9_./-]+)")
 
     fun isPrivateUse(codePoint: Int): Boolean = Character.getType(codePoint) == Character.PRIVATE_USE.toInt()
 
-    /** Minecraft multiplies the font texture's RGB by the component's text colour. */
-    fun tint(encoded: String, colour: Int): String {
-        if (colour == 0xffffff || encoded.isEmpty()) return encoded
+    /** Inset the cached square canvas without cropping again or changing its aspect ratio. */
+    fun pad(encoded: String, percentage: Double): String {
+        require(percentage.isFinite() && percentage in 0.0..49.0) { "Invalid icon padding" }
+        val size = (128 * (1 - 2 * percentage / 100)).roundToInt()
+        if (size == 128 || encoded.isEmpty()) return encoded
+        val image = readIcon(encoded)
+        val padded = BufferedImage(128, 128, BufferedImage.TYPE_INT_ARGB)
+        try {
+            val graphics = padded.createGraphics()
+            try {
+                graphics.composite = AlphaComposite.Src
+                graphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR)
+                val offset = (128 - size) / 2
+                graphics.drawImage(image, offset, offset, size, size, null)
+            } finally {
+                graphics.dispose()
+            }
+            return writeIcon(padded)
+        } finally {
+            image.flush()
+            padded.flush()
+        }
+    }
+
+    private fun readIcon(encoded: String): BufferedImage {
+        require(encoded.length <= (MAX_PNG_BYTES * 4 / 3 + 4)) { "Icon image exceeds size limit" }
         val bytes = Base64.getDecoder().decode(encoded)
         require(bytes.size <= MAX_PNG_BYTES) { "Icon image exceeds size limit" }
-        val image = MemoryCacheImageInputStream(bytes.inputStream()).use { input ->
+        return MemoryCacheImageInputStream(bytes.inputStream()).use { input ->
             val reader = ImageIO.getImageReadersByFormatName("png").next()
             try {
                 reader.input = input
@@ -40,6 +67,19 @@ internal object ResourcePackGlyphs {
                 reader.dispose()
             }
         }
+    }
+
+    private fun writeIcon(image: BufferedImage): String {
+        val output = ByteArrayOutputStream()
+        check(ImageIO.write(image, "png", output))
+        require(output.size() <= MAX_PNG_BYTES) { "Icon image exceeds size limit" }
+        return Base64.getEncoder().encodeToString(output.toByteArray())
+    }
+
+    /** Minecraft multiplies the font texture's RGB by the component's text colour. */
+    fun tint(encoded: String, colour: Int): String {
+        if (colour == 0xffffff || encoded.isEmpty()) return encoded
+        val image = readIcon(encoded)
         try {
             val pixels = image.getRGB(0, 0, image.width, image.height, null, 0, image.width)
             for (index in pixels.indices) {
@@ -53,10 +93,7 @@ internal object ResourcePackGlyphs {
             val tinted = BufferedImage(128, 128, BufferedImage.TYPE_INT_ARGB)
             try {
                 tinted.setRGB(0, 0, 128, 128, pixels, 0, 128)
-                val output = ByteArrayOutputStream()
-                check(ImageIO.write(tinted, "png", output))
-                require(output.size() <= MAX_PNG_BYTES) { "Icon image exceeds size limit" }
-                return Base64.getEncoder().encodeToString(output.toByteArray())
+                return writeIcon(tinted)
             } finally {
                 tinted.flush()
             }
@@ -200,10 +237,7 @@ internal object ResourcePackGlyphs {
             graphics.dispose()
         }
         return try {
-            val output = ByteArrayOutputStream()
-            check(ImageIO.write(icon, "png", output))
-            require(output.size() <= MAX_PNG_BYTES) { "Icon image exceeds size limit" }
-            Base64.getEncoder().encodeToString(output.toByteArray())
+            writeIcon(icon)
         } finally {
             icon.flush()
         }

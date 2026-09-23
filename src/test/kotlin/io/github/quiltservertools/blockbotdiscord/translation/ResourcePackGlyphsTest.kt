@@ -95,6 +95,52 @@ class ResourcePackGlyphsTest {
     }
 
     @Test
+    fun `default padding matches gg sans embed cap height within half an output pixel`() {
+        val image = BufferedImage(128, 128, BufferedImage.TYPE_INT_ARGB)
+        for (y in 0 until 128) for (x in 0 until 128) image.setRGB(x, y, 0x80ffffff.toInt())
+        val original = Base64.getEncoder().encodeToString(png(image))
+        val icon = decoded(ResourcePackGlyphs.pad(original, ResourcePackGlyphs.DEFAULT_PADDING))
+        for (y in 0 until 128) for (x in 0 until 128) {
+            assertEquals(if (x in 29..97 && y in 29..97) 0x80ffffff.toInt() else 0, icon.getRGB(x, y))
+        }
+        val renderedHeight = 69.0 / 128 * 18
+        assertTrue(kotlin.math.abs(renderedHeight - 14 * 0.69) <= 18.0 / 128 / 2)
+    }
+
+    @Test
+    fun `padding retains tint transparency and nearest neighbour pixel boundaries`() {
+        val image = BufferedImage(128, 128, BufferedImage.TYPE_INT_ARGB)
+        for (y in 32 until 96) for (x in 0 until 128) {
+            image.setRGB(x, y, if (x < 64) 0x80ffffff.toInt() else 0xff804020.toInt())
+        }
+        val original = Base64.getEncoder().encodeToString(png(image))
+        val tinted = ResourcePackGlyphs.tint(original, 0x804020)
+        val padded = decoded(ResourcePackGlyphs.pad(tinted, 25.0))
+        for (y in 0 until 128) for (x in 0 until 128) {
+            val expected = if (x !in 32..95 || y !in 48..79) 0
+                else if (x < 64) 0x80804020.toInt() else 0xff401004.toInt()
+            assertEquals(expected, padded.getRGB(x, y))
+        }
+        // Width/height stay 2:1 rather than stretching a wide glyph to a square.
+        assertEquals(tinted, ResourcePackGlyphs.pad(tinted, 0.0))
+        assertEquals("", ResourcePackGlyphs.pad("", ResourcePackGlyphs.DEFAULT_PADDING))
+    }
+
+    @Test
+    fun `padding rejects invalid percentages and checks PNG dimensions before decoding`() {
+        val original = Base64.getEncoder().encodeToString(png(BufferedImage(128, 128, BufferedImage.TYPE_INT_ARGB)))
+        for (padding in listOf(-1.0, 49.1, 50.0, Double.NaN, Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY)) {
+            assertFailsWith<IllegalArgumentException> { ResourcePackGlyphs.pad(original, padding) }
+        }
+        val bytes = Base64.getDecoder().decode(original)
+        ByteBuffer.wrap(bytes, 16, 4).putInt(100_000)
+        assertFailsWith<IllegalArgumentException> {
+            ResourcePackGlyphs.pad(Base64.getEncoder().encodeToString(bytes), 25.0)
+        }
+        assertEquals(128, decoded(ResourcePackGlyphs.pad(original, 49.0)).width)
+    }
+
+    @Test
     fun `cyclic references terminate and missing vanilla font references are tolerated`() {
         val pack = iconPack(directory, """{"providers":[
             {"type":"reference","id":"minecraft:default"},

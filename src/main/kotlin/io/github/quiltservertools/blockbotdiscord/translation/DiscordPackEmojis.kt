@@ -64,6 +64,7 @@ internal class DiscordPackEmojis(
     private var refreshAfter = Long.MIN_VALUE
     private var retryAfter = Long.MIN_VALUE
     private var invalidPrefix: String? = null
+    private var invalidPadding: Double? = null
     private var slotsUnavailable = false
     private val usage = mutableMapOf<String, EmojiUsage>()
     private var useOrder = 0L
@@ -106,6 +107,7 @@ internal class DiscordPackEmojis(
         maxLength: Int = 2000,
         enabled: Boolean = true,
         prefix: String = DEFAULT_PREFIX,
+        padding: Double = 0.0,
     ): String {
         val points = text.codePoints().toArray()
         if (points.none(ResourcePackGlyphs::isPrivateUse)) return text
@@ -126,11 +128,25 @@ internal class DiscordPackEmojis(
                     DEFAULT_PREFIX
                 }
                 if (managedPrefixes.add(namePrefix)) usageDirty = true
+                val imagePadding = if (padding.isFinite() && padding in 0.0..49.0) {
+                    invalidPadding = null
+                    padding
+                } else {
+                    if (invalidPadding?.equals(padding) != true) {
+                        warn("Invalid ResourcePackEmojis.padding; use a percentage from 0 to 49. Using ${ResourcePackGlyphs.DEFAULT_PADDING}")
+                        invalidPadding = padding
+                    }
+                    ResourcePackGlyphs.DEFAULT_PADDING
+                }
                 try {
                     // A message cannot trigger an entire pack's worth of uploads.
                     val icons = points.distinct().filter { glyphs[it]?.isNotEmpty() == true }
                     if (icons.isEmpty()) return@withLock
-                    val images = icons.associateWith { Base64.getDecoder().decode(glyphs.getValue(it)) }
+                    // Transform before naming, reserving slots or uploading. A new
+                    // padding value gets a new artwork hash and cannot reuse an old ID.
+                    val images = icons.associateWith {
+                        Base64.getDecoder().decode(ResourcePackGlyphs.pad(glyphs.getValue(it), imagePadding))
+                    }
                     val needed = images.values.map { emojiName(it, namePrefix) }.toSet()
                     if (scope != null) pending.getOrPut(scope) { mutableSetOf() }.addAll(needed)
                     // Previously uploaded icons remain usable during an API outage.

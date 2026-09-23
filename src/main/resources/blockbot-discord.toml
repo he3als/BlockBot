@@ -87,6 +87,10 @@ prefix = "bb_"
 # Tint icons with their Minecraft text colour. False keeps the original texture colours.
 # Transparency is preserved and resizing always uses nearest-neighbour interpolation.
 coloured = true
+# Transparent padding per side, as a percentage of the 128px emoji canvas (0-49).
+# Default targets gg sans capitals in 14px advancement descriptions: 9.66px in an 18px emoji.
+# Higher values make artwork smaller. Set 0 to restore the previous full-size icons.
+padding = 23.1667
 
 [ConsoleRelay]
 # Format to use for the console relay

@@ -120,6 +120,7 @@ class BlockBotApiExtension : Extension(), Bot {
             maxLength,
             config[ResourcePackEmojisSpec.enabled],
             config[ResourcePackEmojisSpec.emojiPrefix],
+            config[ResourcePackEmojisSpec.padding],
         )
 
     private fun translate(component: Component): String =
