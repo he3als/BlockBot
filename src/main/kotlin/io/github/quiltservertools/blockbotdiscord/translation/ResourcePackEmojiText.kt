@@ -20,10 +20,10 @@ internal class ResourcePackEmojiText(
     private var nextAlias = 0x100000
     private var warned = false
 
-    fun translate(component: Component): String = if (coloured) prepare(component).string
-        else component.withResourcePackTranslations(translations).string
+    fun translate(component: Component): String = prepare(component).string
 
-    fun prepare(component: Component): Component = if (coloured) prepare(component, Style.EMPTY) else component
+    fun prepare(component: Component): Component =
+        if (coloured) prepare(component, Style.EMPTY) else component.withResourcePackTranslations(translations)
 
     private fun prepare(component: Component, inherited: Style): Component {
         val effective = component.style.applyTo(inherited)

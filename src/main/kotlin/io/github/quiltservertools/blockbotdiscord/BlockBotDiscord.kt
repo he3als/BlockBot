@@ -72,6 +72,12 @@ object BlockBotDiscord : ModInitializer, CoroutineScope {
             FabricLoader.getInstance().gameDir.resolve("server.properties"),
             ::logInfo,
             ::logWarn,
+            settings = {
+                ResourcePackTranslations.Settings(
+                    config[ResourcePackTranslationsSpec.enabled],
+                    config[ResourcePackTranslationsSpec.language],
+                )
+            },
         )
         resourcePackTranslations.start()
         launch {

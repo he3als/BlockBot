@@ -32,8 +32,8 @@ import io.github.quiltservertools.blockbotapi.sender.PlayerMessageSender
 import io.github.quiltservertools.blockbotapi.sender.RelayMessageSender
 import io.github.quiltservertools.blockbotdiscord.BlockBotDiscord
 import io.github.quiltservertools.blockbotdiscord.MentionToMinecraftRenderer
-import io.github.quiltservertools.blockbotdiscord.logWarn
 import io.github.quiltservertools.blockbotdiscord.logInfo
+import io.github.quiltservertools.blockbotdiscord.logWarn
 import io.github.quiltservertools.blockbotdiscord.config.*
 import io.github.quiltservertools.blockbotdiscord.translation.DiscordPackEmojis
 import io.github.quiltservertools.blockbotdiscord.translation.ResourcePackEmojiText
@@ -84,15 +84,16 @@ class BlockBotApiExtension : Extension(), Bot {
     private val discordSerializer = DiscordSerializer(
         DiscordSerializerOptions.defaults()
             .withKeybindProvider { Component.translatable(it.keybind()).string }
-            // 4.3.0 expects fully substituted plain text; it serializes children
-            // separately and escapes Discord markdown after calling this provider.
+            // The serializer expects substituted text and handles children separately.
             .withTranslationProvider { translate(it.children(emptyList()).toNative(server.registryAccess())) }
     )
     private val server: MinecraftServer by inject()
     private val mentions = AllowedMentionsBuilder()
     private val packEmojis by lazy {
         DiscordPackEmojis(
-            kord, ::logWarn, ::logInfo,
+            kord,
+            ::logWarn,
+            ::logInfo,
             FabricLoader.getInstance().configDir.resolve("blockbot-resourcepack-cache/discord/${kord.selfId}/emoji-usage.json"),
         )
     }
@@ -104,8 +105,10 @@ class BlockBotApiExtension : Extension(), Bot {
     private fun emojiText(): ResourcePackEmojiText {
         val pack = BlockBotDiscord.resourcePackTranslations.snapshot
         return ResourcePackEmojiText(
-            pack.translations, pack.glyphs,
-            config[ResourcePackEmojisSpec.enabled] && config[ResourcePackEmojisSpec.coloured], ::logWarn,
+            pack.translations,
+            pack.glyphs,
+            config[ResourcePackEmojisSpec.enabled] && config[ResourcePackEmojisSpec.coloured],
+            ::logWarn,
         )
     }
 
@@ -119,7 +122,7 @@ class BlockBotApiExtension : Extension(), Bot {
             text,
             glyphs,
             maxLength,
-            config[ResourcePackEmojisSpec.enabled],
+            config[ResourcePackTranslationsSpec.enabled] && config[ResourcePackEmojisSpec.enabled],
             config[ResourcePackEmojisSpec.emojiPrefix],
             config[ResourcePackEmojisSpec.padding],
             config.resourcePackEmojiLayout(embed),

@@ -1,18 +1,18 @@
 package io.github.quiltservertools.blockbotdiscord.translation
 
-import dev.kord.core.Kord
 import dev.kord.common.entity.Snowflake
+import dev.kord.core.Kord
 import dev.kord.rest.Image
 import dev.kord.rest.request.RestRequestException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
-import java.security.MessageDigest
 import java.nio.file.Path
+import java.security.MessageDigest
 import java.util.Base64
 import java.util.HexFormat
 import java.util.concurrent.TimeUnit
@@ -79,7 +79,7 @@ internal class DiscordPackEmojis(
         companion object Key : CoroutineContext.Key<MessageScope>
     }
 
-    /** Complete eviction/upload before sending and serialize sends through Discord's response. */
+    // Hold the message queue until Discord confirms the send, so its icons cannot be evicted.
     suspend fun <T> withMessage(block: suspend () -> T): T {
         // Helpers may wrap a send already inside a message scope.
         if (currentCoroutineContext()[MessageScope]?.owner === this) return block()
@@ -151,15 +151,18 @@ internal class DiscordPackEmojis(
                     ResourcePackGlyphs.DEFAULT_PADDING
                 }
                 try {
-                    // A message cannot trigger an entire pack's worth of uploads.
                     val icons = points.distinct().filter { glyphs[it]?.isNotEmpty() == true }
                     if (icons.isEmpty()) return@withLock
                     // Transform before naming, reserving slots or uploading. A new
                     // layout gets a new artwork hash and cannot reuse an old ID.
                     val images = icons.associateWith {
                         val artwork = glyphs.getValue(it)
-                        Base64.getDecoder().decode(if (imageLayout == null) ResourcePackGlyphs.pad(artwork, imagePadding)
-                            else ResourcePackGlyphs.layout(artwork, imageLayout))
+                        val image = if (imageLayout == null) {
+                            ResourcePackGlyphs.pad(artwork, imagePadding)
+                        } else {
+                            ResourcePackGlyphs.layout(artwork, imageLayout)
+                        }
+                        Base64.getDecoder().decode(image)
                     }
                     val needed = images.values.map { emojiName(it, namePrefix) }.toSet()
                     if (scope != null) pending.getOrPut(scope) { mutableSetOf() }.addAll(needed)
@@ -188,7 +191,7 @@ internal class DiscordPackEmojis(
                     throw cancelled
                 } catch (_: NoManagedSlotException) {
                     if (!slotsUnavailable) {
-                        warn("Discord emoji slots are full; no unused managed icon can be replaced. Sending readable text")
+                        warn("Discord emoji slots are full; no managed icon can be replaced. Sending readable text")
                         slotsUnavailable = true
                     }
                 } catch (_: Exception) {
@@ -227,8 +230,7 @@ internal class DiscordPackEmojis(
             if (scope != null) {
                 for ((name, count) in uses) scope.uses[name] = scope.uses.getOrDefault(name, 0L) + count
             } else {
-                // Standalone rendering is useful for callers/tests without a send.
-                // Production relay paths always use withMessage to protect delivery.
+                // Relay paths use withMessage; standalone callers count at render time.
                 recordUsage(uses)
                 saveUsage()
             }

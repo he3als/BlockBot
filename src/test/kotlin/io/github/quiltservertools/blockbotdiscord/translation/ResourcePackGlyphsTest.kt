@@ -207,6 +207,26 @@ class ResourcePackGlyphsTest {
     }
 
     @Test
+    fun `damaged cached PNG is downloaded again instead of failing on every message`() {
+        val pack = iconPack(directory)
+        advertise(pack)
+        var downloads = 0
+        fun service() = ResourcePackTranslations(directory, directory.resolve("server.properties"), {}, {},
+            { _, destination -> downloads++; Files.copy(pack, destination, REPLACE_EXISTING) })
+        val first = service()
+        first.checkForUpdates()
+        val png = Base64.getDecoder().decode(first.glyphs.getValue(0xe00f))
+        // Keep a valid PNG signature and dimensions but remove the image data.
+        val truncated = Base64.getEncoder().encodeToString(png.copyOf(33))
+        val cache = directory.resolve("blockbot-resourcepack-cache/v3/${sha1(pack)}/font-glyphs.json")
+        Files.writeString(cache, Gson().toJson(mapOf(0xe00f to truncated)))
+        val restarted = service()
+        restarted.checkForUpdates()
+        assertEquals(2, downloads)
+        assertEquals(first.glyphs, restarted.glyphs)
+    }
+
+    @Test
     fun `oversized PNG dimensions are rejected before decoding pixels`() {
         val texture = iconAtlas()
         ByteBuffer.wrap(texture, 16, 4).putInt(100_000)

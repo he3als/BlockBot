@@ -1,17 +1,18 @@
 package io.github.quiltservertools.blockbotdiscord.translation
 
+import com.google.gson.Gson
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.zip.CRC32
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
-import java.util.zip.CRC32
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFails
 import kotlin.test.assertFailsWith
 
-class EnglishTranslationsTest {
+class ResourcePackLanguagesTest {
     @TempDir
     lateinit var directory: Path
 
@@ -19,7 +20,7 @@ class EnglishTranslationsTest {
     fun `accepts only string values`() {
         assertEquals(
             mapOf("title" to "Light a Campfire", "empty" to ""),
-            EnglishTranslations.readJson(
+            ResourcePackLanguages.readJson(
                 """{"title":"Light a Campfire","number":7,"bool":true,"null":null,"array":[],"object":{},"empty":""}""".reader()
             )
         )
@@ -28,10 +29,10 @@ class EnglishTranslationsTest {
     @Test
     fun `malformed files reject the candidate instead of publishing a partial map`() {
         for (json in listOf("{", "[]", "{\"key\":\"ok\",}", "{key:'unquoted'}", "{} {}")) {
-            assertFails { EnglishTranslations.readJson(json.reader()) }
+            assertFails { ResourcePackLanguages.readJson(json.reader()) }
         }
         assertFails {
-            EnglishTranslations.readPack(packOf(directory, "en_us" to """{"title":"Good"}""", "en_gb" to "{"))
+            ResourcePackLanguages.readPack(packOf(directory, "en_us" to """{"title":"Good"}""", "en_gb" to "{"))
         }
     }
 
@@ -59,14 +60,42 @@ class EnglishTranslationsTest {
                 "crossNamespace" to "US", "collision" to "Z", "vanillaOverride" to "Pack",
                 "alphabetical" to "AB", "arbitrary" to "Discovered", "unusual" to "Last resort",
             ),
-            EnglishTranslations.readPack(pack)
+            ResourcePackLanguages.select(ResourcePackLanguages.readPack(pack), "en_us")
         )
     }
 
     @Test
+    fun `preferred language wins before English fallbacks and other languages stay unused`() {
+        val pack = packOf(directory,
+            "en_us" to """{"title":"Campfire","english":"US"}""",
+            "en_gb" to """{"title":"GB","english":"GB","british":"GB"}""",
+            "fr_fr" to """{"title":"Feu de camp","preferredOnly":"French"}""",
+            "de_de" to """{"unrelated":"German"}""",
+            "en_zz-extra" to """{"rare":"Discovered"}""",
+        )
+        val languages = ResourcePackLanguages.readPack(pack)
+        assertEquals(
+            mapOf("title" to "Feu de camp", "preferredOnly" to "French", "english" to "US", "british" to "GB", "rare" to "Discovered"),
+            ResourcePackLanguages.select(languages, "fr_fr")
+        )
+        assertEquals("GB", ResourcePackLanguages.select(languages, "en_gb")["title"])
+        assertEquals("Campfire", ResourcePackLanguages.select(languages, "es_es")["title"])
+    }
+
+    @Test
+    fun `cached languages round trip and malformed cache values are rejected`() {
+        val languages = mapOf("fr_fr" to mapOf("title" to "Feu de camp"), "en_us" to mapOf("title" to "Campfire"))
+        assertEquals(languages, ResourcePackLanguages.readCache(Gson().toJson(languages).reader()))
+        for (json in listOf(
+            """{"fr_fr":{"title":false}}""", """{"en_us":"flat"}""", """{"../escape":{}}""",
+            """{"en_us":{},"en_us":{}}""", "{} []",
+        )) assertFails { ResourcePackLanguages.readCache(json.reader()) }
+    }
+
+    @Test
     fun `oversized compressed language files are rejected`() {
-        val pack = packOf(directory, "en_us" to " ".repeat(EnglishTranslations.MAX_FILE_BYTES + 1))
-        assertFailsWith<PackTranslationException> { EnglishTranslations.readPack(pack) }
+        val pack = packOf(directory, "en_us" to " ".repeat(ResourcePackLanguages.MAX_FILE_BYTES + 1))
+        assertFailsWith<PackTranslationException> { ResourcePackLanguages.readPack(pack) }
     }
 
     @Test
@@ -87,7 +116,7 @@ class EnglishTranslationsTest {
         val offset = bytes.indices.first { bytes[it] == '{'.code.toByte() }
         bytes[offset + 8] = 'X'.code.toByte()
         Files.write(path, bytes)
-        assertFailsWith<PackTranslationException> { EnglishTranslations.readPack(path) }
+        assertFailsWith<PackTranslationException> { ResourcePackLanguages.readPack(path) }
     }
 }
 

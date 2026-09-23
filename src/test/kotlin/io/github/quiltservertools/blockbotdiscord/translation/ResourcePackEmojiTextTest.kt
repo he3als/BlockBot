@@ -16,7 +16,6 @@ import javax.imageio.ImageIO
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
-import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 class ResourcePackEmojiTextTest {
@@ -96,12 +95,20 @@ class ResourcePackEmojiTextTest {
     fun `disabled tint and white or absent colours reuse the exact original artwork`() {
         val disabled = text(coloured = false)
         val source = Component.literal("\ue00f").withStyle(ChatFormatting.RED)
-        assertSame(source, disabled.prepare(source))
+        assertEquals(source, disabled.prepare(source))
         assertEquals(glyphs, disabled.glyphs)
         val enabled = text()
         assertEquals("\ue00f", enabled.prepare(Component.literal("\ue00f")).string)
         assertEquals("\ue00f", enabled.prepare(Component.literal("\ue00f").withStyle(ChatFormatting.WHITE)).string)
         assertEquals(glyphs, enabled.glyphs)
+    }
+
+    @Test
+    fun `disabled tint still resolves the captured translation snapshot before serialization`() {
+        val source = Component.translatable("adv.kleispack.silver.desc")
+        val prepared = text(coloured = false).prepare(source)
+        assertEquals("\ue00f Silver, a once-common Apotropaic Metal", prepared.string)
+        assertEquals("adv.kleispack.silver.desc", source.string)
     }
 
     @Test

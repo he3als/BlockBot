@@ -25,13 +25,11 @@ guild =
 ```
 A full list of options can be found in the [configuration file](src/main/resources/blockbot-discord.toml).
 
-BlockBot automatically loads English server resource-pack translations when
-Better Server Packs is configured, or `resource-pack` and `resource-pack-sha1`
-are set in `server.properties`. Better Server Packs takes priority.
-Custom bitmap icons from the pack's default font are relayed as Discord
-application emoji in chat and advancements.
-See [resource-pack translations](docs/resource-pack-translations.md)
-for fallback rules, icons, caching, limits, and build instructions.
+BlockBot can use your server resource pack to translate custom text and show
+bitmap icons as Discord emoji. This is enabled by default. Better Server Packs
+takes priority over the vanilla resource-pack settings.
+See [server resource packs](docs/resource-pack-translations.md) for language
+selection, icon settings and troubleshooting.
 
 ## License
 

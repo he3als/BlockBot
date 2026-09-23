@@ -126,10 +126,6 @@ dependencies {
     testImplementation("io.ktor:ktor-client-mock:3.4.0")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 
-    implementation("com.ibm.icu:icu4j:74.2")
-    include("com.ibm.icu:icu4j:74.2")
-    shadow("com.ibm.icu:icu4j:74.2")
-
     // Optional deps
     compileOnly(rootProject.libs.vanish.api)
 
@@ -192,7 +188,6 @@ tasks {
 
 //        minimize {
 //            exclude(project(":blockbot-api"))
-//            exclude(dependency("com.ibm.icu:icu4j:.*"))
 //        }
         mergeServiceFiles()
 
@@ -208,7 +203,6 @@ tasks {
         relocate("com.uchuhimo")
         relocate("com.github.zafarkhaja")
         relocate("com.googlecode")
-//        relocate("com.ibm")
         relocate("com.iwebpp")
         relocate("dev.kordex")
         relocate("com.typesafe")

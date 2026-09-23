@@ -21,8 +21,7 @@ import kotlin.math.roundToInt
 
 /** Bitmap icons in the default font, including references to fonts in other namespaces. */
 internal object ResourcePackGlyphs {
-    // gg sans capHeight/unitsPerEm = 690/1000. Embed text is 14px, emoji 18px.
-    // 100 * (1 - (14 * 0.69 / 18)) / 2; see docs/resource-pack-translations.md.
+    // Retained for configurations using centred padding instead of automatic layout.
     const val DEFAULT_PADDING = 23.1667
     private const val MAX_GLYPHS = 512
     private const val MAX_PNG_BYTES = 128 * 1024
@@ -288,14 +287,10 @@ internal object ResourcePackGlyphs {
             val point = key.toInt()
             require(isPrivateUse(point) && value.isJsonPrimitive && value.asJsonPrimitive.isString) { "Invalid cached icon" }
             val encoded = value.asString
-            require(encoded.length <= (MAX_PNG_BYTES * 4 / 3 + 4)) { "Cached icon exceeds size limit" }
-            val bytes = Base64.getDecoder().decode(encoded)
-            require(bytes.isEmpty() || (bytes.size >= 24 && bytes.take(8) == PNG_HEADER)) { "Invalid cached PNG" }
+            if (encoded.isNotEmpty()) readIcon(encoded).flush()
             point to encoded
         }
     }
-
-    private val PNG_HEADER = listOf(137, 80, 78, 71, 13, 10, 26, 10).map { it.toByte() }
 
     private fun readObject(reader: Reader): JsonObject = JsonReader(reader).use { json ->
         json.strictness = Strictness.STRICT

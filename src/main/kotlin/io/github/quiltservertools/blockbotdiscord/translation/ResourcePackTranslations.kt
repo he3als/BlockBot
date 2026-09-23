@@ -22,24 +22,34 @@ internal class ResourcePackTranslations(
     private val warn: (String) -> Unit,
     private val download: (URI, Path) -> Unit = ResourcePackDownload::download,
     private val nanoTime: () -> Long = System::nanoTime,
+    private val settings: () -> Settings = { Settings() },
 ) : AutoCloseable {
+    data class Settings(val enabled: Boolean = true, val language: String = ResourcePackLanguages.DEFAULT_LANGUAGE)
     private data class Source(val hash: String, val url: URI, val origin: String)
-    internal data class Snapshot(
+    private data class Pack(
+        val hash: String,
+        val languages: Map<String, Map<String, String>>,
+        val glyphs: Map<Int, String>,
+    )
+    data class Snapshot(
         val hash: String?,
         val translations: Map<String, String>,
         val glyphs: Map<Int, String>,
+        val language: String = ResourcePackLanguages.DEFAULT_LANGUAGE,
     )
 
     @Volatile
-    private var active = Snapshot(null, emptyMap(), emptyMap())
-    val snapshot: Snapshot get() = active
-    val translations: Map<String, String> get() = active.translations
-    val glyphs: Map<Int, String> get() = active.glyphs
+    private var active = EMPTY
+    val snapshot: Snapshot get() = if (settings().enabled) active else EMPTY
+    val translations: Map<String, String> get() = snapshot.translations
+    val glyphs: Map<Int, String> get() = snapshot.glyphs
 
     private val betterPacksDirectory = configDirectory.resolve("betterserverpacks")
     private var sourceStatus: String? = null
-    private val cacheDirectory = configDirectory.resolve("blockbot-resourcepack-cache/v2")
+    private val cacheDirectory = configDirectory.resolve("blockbot-resourcepack-cache/v3")
     private var executor: ScheduledExecutorService? = null
+    private var loaded: Pack? = null
+    private var invalidLanguage: String? = null
     private var observedHash: String? = null
     private var failedSource: Source? = null
     private var retryAfter = Long.MIN_VALUE
@@ -55,27 +65,42 @@ internal class ResourcePackTranslations(
         executor?.shutdownNow()
     }
 
-    // Only the background worker calls this in production. Exposed internally for
-    // deterministic tests without timers, a Minecraft server, or an external host.
+    // Called only by the background worker.
     internal fun checkForUpdates() {
         var source: Source? = null
         try {
+            val options = settings()
+            if (!options.enabled) {
+                active = EMPTY
+                loaded = null
+                failedSource = null
+                retryAfter = Long.MIN_VALUE
+                reportSource("Resource-pack translations disabled")
+                return
+            }
+            val language = language(options.language)
             source = readSource() ?: return
-            if (source.hash == active.hash) return
+            if (source.hash == active.hash && language == active.language) return
             if (source == failedSource && nanoTime() < retryAfter) return
             if (observedHash != source.hash) {
                 info("Server resource-pack hash changed: ${observedHash ?: "none"} -> ${source.hash}")
                 observedHash = source.hash
             }
-            val candidate = load(source)
-            // The selected source may have changed again during the download.
-            if (Thread.currentThread().isInterrupted || readSource() != source) return
-            active = candidate
+            val candidate = loaded?.takeIf { it.hash == source.hash } ?: load(source)
+            // A configuration change during download must not activate an obsolete pack.
+            if (Thread.currentThread().isInterrupted || settings() != options || readSource() != source) return
+            val translations = ResourcePackLanguages.select(candidate.languages, language)
+            loaded = candidate
+            active = Snapshot(candidate.hash, translations, candidate.glyphs, language)
             failedSource = null
             retryAfter = Long.MIN_VALUE
-            info("Loaded ${candidate.translations.size} translations from server resource pack")
+            info("Loaded ${translations.size} translations from server resource pack ($language)")
             info("Loaded ${candidate.glyphs.count { it.value.isNotEmpty() }} resource-pack icons for Discord")
-            if (candidate.translations.isEmpty()) warn("No English translations found in server resource pack")
+            if (translations.isEmpty()) {
+                warn("No translations found for $language or English in server resource pack")
+            } else if (language != ResourcePackLanguages.DEFAULT_LANGUAGE && language !in candidate.languages) {
+                warn("Server resource pack has no $language translations; using English")
+            }
             pruneCache()
         } catch (exception: Exception) {
             if (Thread.currentThread().isInterrupted) return
@@ -88,6 +113,19 @@ internal class ResourcePackTranslations(
             }
             failedSource = source
         }
+    }
+
+    private fun language(value: String): String {
+        val normalized = ResourcePackLanguages.normalizeLanguage(value)
+        if (normalized != null) {
+            invalidLanguage = null
+            return normalized
+        }
+        if (invalidLanguage != value) {
+            warn("Invalid ResourcePackTranslations.language; use a Minecraft language code such as en_us. Using en_us")
+            invalidLanguage = value
+        }
+        return ResourcePackLanguages.DEFAULT_LANGUAGE
     }
 
     private fun readSource(): Source? {
@@ -144,13 +182,13 @@ internal class ResourcePackTranslations(
         return Properties().apply { load(contents.reader()) }
     }
 
-    private fun load(source: Source): Snapshot {
+    private fun load(source: Source): Pack {
         val cacheFile = cacheDirectory.resolve(source.hash).resolve(CACHE_FILE)
         val glyphFile = cacheFile.resolveSibling(GLYPH_FILE)
         if (Files.exists(cacheFile)) {
             try {
                 if (Files.size(cacheFile) > MAX_CACHE_BYTES) throw PackTranslationException("Translation cache is too large")
-                val cached = Files.newBufferedReader(cacheFile).use { EnglishTranslations.readJson(it, cache = true) }
+                val cached = Files.newBufferedReader(cacheFile).use(ResourcePackLanguages::readCache)
                 if (Files.size(glyphFile) > MAX_CACHE_BYTES) throw PackTranslationException("Icon cache is too large")
                 val glyphs = Files.newBufferedReader(glyphFile).use(ResourcePackGlyphs::readCache)
                 try {
@@ -160,7 +198,7 @@ internal class ResourcePackTranslations(
                     warn("Could not update resource-pack translation cache timestamp")
                 }
                 info("Using cached resource-pack translations for ${source.hash}")
-                return snapshot(source.hash, cached, glyphs)
+                return Pack(source.hash, cached, java.util.Map.copyOf(glyphs))
             } catch (_: Exception) {
                 warn("Invalid resource-pack translation cache for ${source.hash}; downloading again")
             }
@@ -182,7 +220,7 @@ internal class ResourcePackTranslations(
             if (HexFormat.of().formatHex(digest.digest()) != source.hash) {
                 throw PackTranslationException("Downloaded resource-pack SHA-1 does not match")
             }
-            val values = EnglishTranslations.readPack(pack)
+            val values = ResourcePackLanguages.readPack(pack)
             val glyphs = try {
                 ResourcePackGlyphs.readPack(pack)
             } catch (_: Exception) {
@@ -193,19 +231,16 @@ internal class ResourcePackTranslations(
             Files.createDirectories(cacheFile.parent)
             writeCache(glyphFile, glyphs)
             writeCache(cacheFile, values)
-            return snapshot(source.hash, values, glyphs)
+            return Pack(source.hash, values, java.util.Map.copyOf(glyphs))
         } finally {
             Files.deleteIfExists(pack)
         }
     }
 
-    private fun snapshot(hash: String, values: Map<String, String>, glyphs: Map<Int, String>) =
-        Snapshot(hash, java.util.Map.copyOf(values), java.util.Map.copyOf(glyphs))
-
     private fun writeCache(path: Path, values: Map<*, *>) {
         val temporary = Files.createTempFile(path.parent, "cache-", ".tmp")
         try {
-            Files.newBufferedWriter(temporary).use { Gson().toJson(values, it) }
+            Files.newBufferedWriter(temporary).use { JSON.toJson(values, it) }
             if (Files.size(temporary) > MAX_CACHE_BYTES) throw PackTranslationException("Resource-pack cache is too large")
             Files.move(temporary, path, ATOMIC_MOVE, REPLACE_EXISTING)
         } finally {
@@ -232,8 +267,10 @@ internal class ResourcePackTranslations(
     }
 
     private companion object {
+        val JSON = Gson()
         val HASH = Regex("[0-9a-f]{40}")
-        const val CACHE_FILE = "english-translations.json"
+        val EMPTY = Snapshot(null, emptyMap(), emptyMap())
+        const val CACHE_FILE = "languages.json"
         const val GLYPH_FILE = "font-glyphs.json"
         const val MAX_CACHE_BYTES = 64L * 1024 * 1024
     }

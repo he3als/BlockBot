@@ -76,24 +76,27 @@ escapeIngameMarkdown = false
     # Placeholders: {sender}, {sender_display}
     authorFormat = "{sender}"
 
-[ResourcePackEmojis]
-# Render private-use bitmap icons from the server pack as Discord application emoji.
-# When disabled, hide these glyphs and keep the readable text. Translations stay enabled.
+[ResourcePackTranslations]
+# Use server resource-pack translations and icons in Discord
 enabled = true
-# Name prefix: 1-16 ASCII letters, digits, or underscores. The artwork hash is appended.
-# When slots fill, the least-used managed emoji is replaced (including in older messages).
-# Changing this creates new emoji as needed. Reserve this prefix for BlockBot.
+# Preferred Minecraft language code. Missing translations fall back to English
+language = "en_us"
+
+[ResourcePackEmojis]
+# Show pack icons as Discord emoji. False hides icons and keeps translations
+enabled = true
+# Emoji name prefix: 1-16 letters, digits or underscores. Reserve this for BlockBot
+# Full slots replace the least-used icon; its artwork also disappears from older messages
 prefix = "bb_"
-# Tint icons with their Minecraft text colour. False keeps the original texture colours.
-# Transparency is preserved and resizing always uses nearest-neighbour interpolation.
+# Match Minecraft text colours. False keeps the texture's original colours
 coloured = true
-# Automatically size and baseline-align visible artwork for chat or advancement descriptions.
+# Match icon size and alignment to the surrounding text
 automaticLayout = true
-# Size multiplier (0.25-2). Scaling keeps the bottom anchored to the text baseline.
+# Icon size multiplier (0.25-2)
 scale = 1.0
-# Vertical adjustment in CSS pixels (-16 to 16). Positive moves artwork down.
+# Move icons up (-) or down (+), in pixels (-16 to 16)
 baselineOffset = 0.0
-# Legacy centred padding, used ONLY when automaticLayout = false (0-49 percent per side).
+# Padding per side when automaticLayout is false (0-49 percent)
 padding = 23.1667
 
 [ConsoleRelay]

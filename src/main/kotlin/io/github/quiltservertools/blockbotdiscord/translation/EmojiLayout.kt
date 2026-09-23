@@ -3,7 +3,8 @@ package io.github.quiltservertools.blockbotdiscord.translation
 import kotlin.math.floor
 import kotlin.math.roundToInt
 
-/** Font metrics come from gg sans 2.001, not a canvas measurement of one letter. */
+// gg sans 2.001: https://discord.com/assets/66d715454104d24e.woff2
+// Font units: 1000 per em, cap height 690, ascent 1018, descent 316.
 internal data class EmojiLayout(
     val context: Context,
     val fontSize: Double = context.fontSize,
@@ -23,10 +24,8 @@ internal data class EmojiLayout(
     val capHeight: Double get() = fontSize * 690 / 1000 * scale
 
     val baseline: Double get() {
-        // Discord uses a baseline-aligned inline-block around a bottom-aligned
-        // image. Its last line's strut determines the baseline within the image.
-        // Chromium rounds font ascent/descent to CSS pixels and floors half-leading.
-        // Verified against actual chat/embed DOM and six isolated font sizes.
+        // Discord wraps bottom-aligned emoji in a baseline-aligned inline-block.
+        // Match Chromium's font-metric rounding and half-leading placement.
         val ascent = (fontSize * 1018 / 1000).roundToInt()
         val descent = (fontSize * 316 / 1000).roundToInt()
         val leading = lineHeight - ascent - descent

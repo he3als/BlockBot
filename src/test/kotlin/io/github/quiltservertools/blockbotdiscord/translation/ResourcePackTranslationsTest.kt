@@ -25,8 +25,10 @@ class ResourcePackTranslationsTest {
     private val logs = mutableListOf<String>()
     private val serverPropertiesFile: Path get() = directory.resolve("server.properties")
 
-    private fun service(download: (URI, Path) -> Unit) =
-        ResourcePackTranslations(directory, serverPropertiesFile, logs::add, warnings::add, download)
+    private fun service(
+        settings: () -> ResourcePackTranslations.Settings = { ResourcePackTranslations.Settings() },
+        download: (URI, Path) -> Unit,
+    ) = ResourcePackTranslations(directory, serverPropertiesFile, logs::add, warnings::add, download, settings = settings)
 
     private fun advertise(pack: Path, hash: String = sha1(pack)) {
         Files.writeString(serverPropertiesFile, "resource-pack=https\\://example.invalid/pack.zip\nresource-pack-sha1=$hash\n")
@@ -153,7 +155,7 @@ class ResourcePackTranslationsTest {
             service.checkForUpdates()
             assertEquals(1, downloads)
             assertEquals("Valid", service.translations["key"])
-            val cache = directory.resolve("blockbot-resourcepack-cache/v2/${sha1(pack)}/english-translations.json")
+            val cache = directory.resolve("blockbot-resourcepack-cache/v3/${sha1(pack)}/languages.json")
             assertTrue(Files.exists(cache))
             Files.delete(cache)
         }
@@ -219,7 +221,7 @@ class ResourcePackTranslationsTest {
         assertEquals(2, downloads)
         assertEquals(1, warnings.size)
         assertTrue(warnings.single().contains("SHA-1 does not match"))
-        assertFalse(Files.exists(directory.resolve("blockbot-resourcepack-cache/v2/$badHash/english-translations.json")))
+        assertFalse(Files.exists(directory.resolve("blockbot-resourcepack-cache/v3/$badHash/languages.json")))
         assertNoTemporaryFiles()
     }
 
@@ -255,7 +257,7 @@ class ResourcePackTranslationsTest {
         advertise(pack)
         service.checkForUpdates()
         assertSame(old, service.translations)
-        assertFalse(Files.exists(directory.resolve("blockbot-resourcepack-cache/v2/${sha1(pack)}/english-translations.json")))
+        assertFalse(Files.exists(directory.resolve("blockbot-resourcepack-cache/v3/${sha1(pack)}/languages.json")))
         assertEquals(1, warnings.size)
         assertNoTemporaryFiles()
     }
@@ -316,7 +318,7 @@ class ResourcePackTranslationsTest {
     fun `corrupt cache is replaced from a verified download`() {
         val pack = packOf(directory, "en_us" to """{"key":"Valid"}""")
         advertise(pack)
-        val cache = directory.resolve("blockbot-resourcepack-cache/v2/${sha1(pack)}/english-translations.json")
+        val cache = directory.resolve("blockbot-resourcepack-cache/v3/${sha1(pack)}/languages.json")
         Files.createDirectories(cache.parent)
         Files.writeString(cache, """{"key":false}""")
         var downloads = 0
@@ -338,9 +340,124 @@ class ResourcePackTranslationsTest {
             advertise(pack)
             service.checkForUpdates()
         }
-        Files.list(directory.resolve("blockbot-resourcepack-cache/v2")).use { assertEquals(3L, it.count()) }
+        Files.list(directory.resolve("blockbot-resourcepack-cache/v3")).use { assertEquals(3L, it.count()) }
         assertEquals("4", service.translations["version"])
         assertTrue(warnings.isEmpty())
+    }
+
+    @Test
+    fun `language changes reuse the verified pack and survive restart`() {
+        val pack = packOf(directory,
+            "en_us" to """{"title":"Campfire","fallback":"English"}""",
+            "fr_fr" to """{"title":"Feu de camp"}""",
+            "de_de" to """{"title":"Lagerfeuer"}""",
+        )
+        advertise(pack)
+        var options = ResourcePackTranslations.Settings()
+        var downloads = 0
+        val service = service(settings = { options }) { _, destination ->
+            downloads++
+            Files.copy(pack, destination, REPLACE_EXISTING)
+        }
+        service.checkForUpdates()
+        val original = service.snapshot
+        options = options.copy(language = "fr_fr")
+        service.checkForUpdates()
+        assertEquals("fr_fr", service.snapshot.language)
+        assertEquals(mapOf("title" to "Feu de camp", "fallback" to "English"), service.translations)
+        assertEquals("Campfire", original.translations["title"])
+        val restarted = service(settings = { options.copy(language = " DE_DE ") }) { _, _ -> error("Cache miss") }
+        restarted.checkForUpdates()
+        assertEquals("de_de", restarted.snapshot.language)
+        assertEquals("Lagerfeuer", restarted.translations["title"])
+        assertEquals(1, downloads)
+        assertTrue(warnings.isEmpty())
+    }
+
+    @Test
+    fun `disabled feature reads no pack and creates no cache`() {
+        val service = service(settings = { ResourcePackTranslations.Settings(enabled = false) }) { _, _ -> error("Download") }
+        service.checkForUpdates()
+        service.checkForUpdates()
+        assertTrue(service.translations.isEmpty())
+        assertTrue(service.glyphs.isEmpty())
+        assertFalse(Files.exists(directory.resolve("blockbot-resourcepack-cache")))
+        assertEquals(listOf("Resource-pack translations disabled"), logs)
+        assertTrue(warnings.isEmpty())
+    }
+
+    @Test
+    fun `disabling hides the current snapshot and enabling reuses the cache`() {
+        val pack = packOf(directory, "en_us" to """{"title":"Campfire"}""")
+        advertise(pack)
+        var options = ResourcePackTranslations.Settings()
+        var downloads = 0
+        val service = service(settings = { options }) { _, destination ->
+            downloads++
+            Files.copy(pack, destination, REPLACE_EXISTING)
+        }
+        service.checkForUpdates()
+        assertEquals("Campfire", service.translations["title"])
+        options = options.copy(enabled = false)
+        assertTrue(service.translations.isEmpty())
+        assertTrue(service.glyphs.isEmpty())
+        service.checkForUpdates()
+        options = options.copy(enabled = true)
+        service.checkForUpdates()
+        assertEquals("Campfire", service.translations["title"])
+        assertEquals(1, downloads)
+    }
+
+    @Test
+    fun `configuration changes during a download cannot activate stale translations`() {
+        val pack = packOf(directory,
+            "en_us" to """{"title":"Campfire"}""",
+            "fr_fr" to """{"title":"Feu de camp"}""",
+        )
+        advertise(pack)
+        for (change in listOf(ResourcePackTranslations.Settings(enabled = false), ResourcePackTranslations.Settings(language = "fr_fr"))) {
+            val cache = directory.resolve("blockbot-resourcepack-cache/v3/${sha1(pack)}/languages.json")
+            Files.deleteIfExists(cache)
+            var options = ResourcePackTranslations.Settings()
+            var downloads = 0
+            val service = service(settings = { options }) { _, destination ->
+                downloads++
+                Files.copy(pack, destination, REPLACE_EXISTING)
+                options = change
+            }
+            service.checkForUpdates()
+            assertTrue(service.translations.isEmpty())
+            service.checkForUpdates()
+            if (change.enabled) assertEquals("Feu de camp", service.translations["title"])
+            else assertTrue(service.translations.isEmpty())
+            assertEquals(1, downloads)
+        }
+    }
+
+    @Test
+    fun `invalid language uses English and warns once without logging supplied contents`() {
+        val pack = packOf(directory, "en_us" to """{"key":"English"}""")
+        advertise(pack)
+        val service = service(settings = { ResourcePackTranslations.Settings(language = "../secret") }) { _, destination ->
+            Files.copy(pack, destination, REPLACE_EXISTING)
+        }
+        repeat(2) { service.checkForUpdates() }
+        assertEquals("English", service.translations["key"])
+        assertEquals(1, warnings.size)
+        assertFalse(warnings.single().contains("secret"))
+    }
+
+    @Test
+    fun `missing preferred language uses English and warns without polling spam`() {
+        val pack = packOf(directory, "en_ca" to """{"key":"Canadian"}""")
+        advertise(pack)
+        val service = service(settings = { ResourcePackTranslations.Settings(language = "fr_fr") }) { _, destination ->
+            Files.copy(pack, destination, REPLACE_EXISTING)
+        }
+        repeat(2) { service.checkForUpdates() }
+        assertEquals("Canadian", service.translations["key"])
+        assertEquals(1, warnings.size)
+        assertTrue(warnings.single().contains("no fr_fr translations"))
     }
 
     private fun assertNoTemporaryFiles() {
