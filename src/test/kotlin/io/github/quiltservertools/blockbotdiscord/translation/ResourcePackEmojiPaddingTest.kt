@@ -91,4 +91,62 @@ class ResourcePackEmojiPaddingTest {
         val disabled = DiscordPackEmojis({ error("No API request") }, { _, _ -> error("No upload") }, { error(it) })
         assertEquals("Silver", disabled.render("\ue00f Silver", mapOf(0xe00f to "bad PNG"), enabled = false, padding = Double.NaN))
     }
+
+    @Test
+    fun `automatic chat and embed artwork uses distinct IDs and replacement finishes before sending`() = runBlocking {
+        val glyphs = glyphs()
+        val remote = mutableMapOf<String, String>()
+        val events = mutableListOf<String>()
+        val store = EmojiUsageStore(directory.resolve("layout-usage.json"), warn = { error(it) })
+        var uploads = 0
+        fun service() = DiscordPackEmojis({ remote.toMap() }, { name, _ ->
+            assertTrue(remote.isEmpty())
+            events.add("upload")
+            "<:$name:${++uploads}>".also { remote[name] = it }
+        }, { error(it) }, delete = { mention ->
+            assertEquals(remote.values.single(), mention)
+            events.add("delete")
+            remote.clear()
+        }, capacity = 1, usageStore = store)
+        val service = service()
+        suspend fun send(context: EmojiLayout.Context) = service.withMessage {
+            service.render("\ue00f Silver", glyphs, layout = EmojiLayout(context)).also {
+                assertTrue(it.startsWith(remote.values.single()))
+                events.add("send")
+            }
+        }
+        val embed = send(EmojiLayout.Context.EMBED)
+        val chat = send(EmojiLayout.Context.CHAT)
+        assertNotEquals(embed, chat)
+        assertEquals(listOf("upload", "send", "delete", "upload", "send"), events)
+        val restarted = service()
+        assertEquals(chat, restarted.withMessage {
+            restarted.render("\ue00f Silver", glyphs, layout = EmojiLayout(EmojiLayout.Context.CHAT))
+        })
+        assertEquals(2, uploads)
+        assertEquals(2L, store.load().emojis.values.single().count)
+    }
+
+    @Test
+    fun `invalid automatic settings fall back per context once and ignore legacy padding`() = runBlocking {
+        val glyphs = glyphs()
+        for (context in EmojiLayout.Context.entries) {
+            val warnings = mutableListOf<String>()
+            val expected = Base64.getDecoder().decode(ResourcePackGlyphs.layout(glyphs.getValue(0xe00f), EmojiLayout(context)))
+            var uploads = 0
+            val service = DiscordPackEmojis({ emptyMap() }, { name, png ->
+                assertTrue(png.contentEquals(expected))
+                uploads++
+                "<:$name:1>"
+            }, warnings::add)
+            repeat(2) {
+                service.withMessage {
+                    service.render("\ue00f Silver", glyphs, padding = Double.NaN,
+                        layout = EmojiLayout(context, scale = Double.NaN))
+                }
+            }
+            assertEquals(1, uploads)
+            assertEquals(1, warnings.size)
+        }
+    }
 }

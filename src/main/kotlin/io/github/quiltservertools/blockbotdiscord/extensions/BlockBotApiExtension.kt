@@ -113,6 +113,7 @@ class BlockBotApiExtension : Extension(), Bot {
         text: String,
         maxLength: Int = 2000,
         glyphs: Map<Int, String> = BlockBotDiscord.resourcePackTranslations.glyphs,
+        embed: Boolean = false,
     ): String =
         packEmojis.render(
             text,
@@ -121,6 +122,7 @@ class BlockBotApiExtension : Extension(), Bot {
             config[ResourcePackEmojisSpec.enabled],
             config[ResourcePackEmojisSpec.emojiPrefix],
             config[ResourcePackEmojisSpec.padding],
+            config.resourcePackEmojiLayout(embed),
         )
 
     private fun translate(component: Component): String =
@@ -435,7 +437,7 @@ class BlockBotApiExtension : Extension(), Bot {
                 if (emojiEnabled) title else DiscordPackEmojis.withoutGlyphs(title),
                 if (emojiEnabled) details else DiscordPackEmojis.withoutGlyphs(details),
                 config.getWebhookChatRelayAvatar(player.gameProfile),
-            ) { renderPackEmojis(it, maxLength = 4096, glyphs = emojiText.glyphs) }
+            ) { renderPackEmojis(it, maxLength = 4096, glyphs = emojiText.glyphs, embed = true) }
             embed.color = Colors.blue
             createDiscordEmbed(embed)
         }

@@ -6,6 +6,7 @@ import com.google.gson.Strictness
 import com.google.gson.stream.JsonReader
 import com.google.gson.stream.JsonToken
 import java.awt.AlphaComposite
+import java.awt.Rectangle
 import java.awt.RenderingHints
 import java.awt.image.BufferedImage
 import java.io.ByteArrayOutputStream
@@ -28,6 +29,38 @@ internal object ResourcePackGlyphs {
     private val resourceId = Regex("(?:([a-z0-9_.-]+):)?([a-z0-9_./-]+)")
 
     fun isPrivateUse(codePoint: Int): Boolean = Character.getType(codePoint) == Character.PRIVATE_USE.toInt()
+
+    /** Size the visible artwork, not its square container, and anchor its bottom to the text baseline. */
+    fun layout(encoded: String, layout: EmojiLayout): String {
+        require(layout.isValid()) { "Invalid emoji layout" }
+        if (encoded.isEmpty()) return encoded
+        val image = readIcon(encoded)
+        val icon = BufferedImage(128, 128, BufferedImage.TYPE_INT_ARGB)
+        try {
+            val bounds = visibleBounds(image) ?: return encoded
+            val bottom = (128 * layout.baseline / layout.emojiSize).roundToInt().coerceIn(1, 128)
+            val height = 128 * layout.capHeight / layout.emojiSize
+            // Fit very wide or enlarged artwork without stretching or clipping.
+            val scale = minOf(height / bounds.height, 128.0 / bounds.width, bottom.toDouble() / bounds.height)
+            val targetWidth = (bounds.width * scale).roundToInt().coerceIn(1, 128)
+            val targetHeight = (bounds.height * scale).roundToInt().coerceIn(1, bottom)
+            val left = (128 - targetWidth) / 2
+            val top = bottom - targetHeight
+            val graphics = icon.createGraphics()
+            try {
+                graphics.composite = AlphaComposite.Src
+                graphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR)
+                graphics.drawImage(image, left, top, left + targetWidth, bottom,
+                    bounds.x, bounds.y, bounds.x + bounds.width, bounds.y + bounds.height, null)
+            } finally {
+                graphics.dispose()
+            }
+            return writeIcon(icon)
+        } finally {
+            image.flush()
+            icon.flush()
+        }
+    }
 
     /** Inset the cached square canvas without cropping again or changing its aspect ratio. */
     fun pad(encoded: String, percentage: Double): String {
@@ -204,7 +237,7 @@ internal object ResourcePackGlyphs {
         return "assets/$namespace/$directory/$path$suffix"
     }
 
-    private fun encodeIcon(image: BufferedImage): String {
+    private fun visibleBounds(image: BufferedImage): Rectangle? {
         var left = image.width
         var top = image.height
         var right = -1
@@ -217,9 +250,13 @@ internal object ResourcePackGlyphs {
                 bottom = maxOf(bottom, y)
             }
         }
-        if (right < left) return ""
-        val width = right - left + 1
-        val height = bottom - top + 1
+        return if (right < left) null else Rectangle(left, top, right - left + 1, bottom - top + 1)
+    }
+
+    private fun encodeIcon(image: BufferedImage): String {
+        val bounds = visibleBounds(image) ?: return ""
+        val width = bounds.width
+        val height = bounds.height
         val scale = 128.0 / maxOf(width, height)
         val targetWidth = maxOf(1, (width * scale).toInt())
         val targetHeight = maxOf(1, (height * scale).toInt())
@@ -232,7 +269,8 @@ internal object ResourcePackGlyphs {
             graphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR)
             val x = (128 - targetWidth) / 2
             val y = (128 - targetHeight) / 2
-            graphics.drawImage(image, x, y, x + targetWidth, y + targetHeight, left, top, right + 1, bottom + 1, null)
+            graphics.drawImage(image, x, y, x + targetWidth, y + targetHeight,
+                bounds.x, bounds.y, bounds.x + width, bounds.y + height, null)
         } finally {
             graphics.dispose()
         }

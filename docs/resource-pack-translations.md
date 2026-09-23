@@ -136,6 +136,9 @@ feature. Existing configurations use these defaults without needing edits:
 enabled = true
 prefix = "bb_"
 coloured = true
+automaticLayout = true
+scale = 1.0
+baselineOffset = 0.0
 padding = 23.1667
 ```
 
@@ -149,48 +152,55 @@ text is unchanged. Plain-string messages have no Minecraft colour information
 and use the original artwork. Both modes use nearest-neighbour scaling, with
 no smoothing or blended pixels.
 
-`padding` is transparent space on **each side** of the 128×128 upload canvas,
-expressed as a percentage from `0` to `49`. Higher values make the artwork
-smaller; `0` restores the original full-size icons. Resizing keeps the aspect
-ratio, transparency, tint and nearest-neighbour sampling. Odd-sized artwork
-can have a one-pixel difference between opposite margins. Invalid values warn
-once per changed value and use the default.
+Automatic layout sizes the **visible artwork** to capital-letter height and
+anchors its bottom to the text baseline. It chooses the appropriate layout for
+ordinary chat or advancement embed descriptions without any configuration.
+Transparent margins in the original texture do not affect alignment. Wide
+artwork is scaled down further if necessary to fit the emoji box; aspect ratio,
+transparency, tint and nearest-neighbour sampling are preserved.
 
-The default targets capital letters in **advancement embed descriptions**.
-The calculation uses Discord's desktop/web assets checked on 2026-09-23:
+Optional adjustments apply to both contexts:
+
+- `scale` multiplies the artwork size (`0.25`–`2`), keeping its bottom anchored.
+- `baselineOffset` moves the artwork vertically in CSS pixels (`-16`–`16`);
+  positive values move it down. Artwork stays within the upload canvas.
+
+Invalid adjustments warn and use the default layout. `padding` is a legacy
+setting, used **only** with `automaticLayout = false`: it adds centred transparent
+space on each side of the 128×128 canvas (`0`–`49` percent). Existing configurations
+automatically receive the new alignment even if they contain an old padding value.
+
+The automatic calculation uses Discord's desktop/web assets and actual chat and
+advancement DOM inspected on 2026-09-23, checked against the font's own tables:
 
 - [gg sans Regular 2.001](https://discord.com/assets/66d715454104d24e.woff2)
-  has `unitsPerEm = 1000`, `sCapHeight = 690`, and the `H` outline spans
-  `y = 0..690`. The typographic cap height is therefore `0.69 × font-size`.
-- [Discord's 14px text styles](https://discord.com/assets/603779.863bc0c4e4c6ff49.css)
-  use `line-height: 1.2857142857142858`, giving an 18px line box.
-- [Embed emoji styles](https://discord.com/assets/198496.7ea2af35bfe94977.css)
-  set the emoji box to 18×18px. The line box and the visible capital height
-  are different measurements.
+  has `unitsPerEm = 1000`, `sCapHeight = 690`, ascent `1018` and descent `316`.
+  The `H` outline spans `y = 0..690`; capital height is `0.69 × font-size`.
+- [Emoji images](https://discord.com/assets/552653.83d0e2a7d9e8b38f.css)
+  are bottom-aligned inside a baseline-aligned inline-block. Font ascent,
+  descent and [line leading](https://www.w3.org/TR/CSS2/visudet.html#leading)
+  determine where the text baseline falls inside that image.
+- [Embed text](https://discord.com/assets/603779.863bc0c4e4c6ff49.css)
+  is 14px with an 18px line box and
+  [18px emoji](https://discord.com/assets/198496.7ea2af35bfe94977.css).
+  Chat uses 16px text, a 22px line box and
+  [22px emoji](https://discord.com/assets/419070.51520158c0dc856e.css).
 
-```text
-capital height = 14 × 690 / 1000 = 9.66 CSS px
-padding per side = 100 × (1 - 9.66 / 18) / 2 = 23.166666…%
-```
+| Context | Capital height | Baseline below emoji top | Square artwork in 128px upload |
+| --- | --- | --- | --- |
+| Advancement description | 9.66 CSS px | 14 CSS px | 69px high, bottom at 100px |
+| Ordinary chat | 11.04 CSS px | 16 CSS px | 64px high, bottom at 93px |
 
-At 128px upload resolution this rounds to a 69px inner square, with 29px and
-30px transparent margins, displayed at approximately **9.703px** in an 18px
-emoji box. This is the nearest whole-pixel result, not a promise of exact
-screen-pixel equality. Rasterization, font hinting, zoom, mobile clients,
-custom fonts and Discord's image resizing can change the visible result.
-Rounded letters such as `O` also extend beyond the nominal cap height. Wide
-or short artwork remains proportionally shorter than the inner square.
+The source-metric calculation was independently checked with DOM baseline markers
+at six font sizes and a local before/after preview using actual advancement icons.
+PNG coordinates must round to whole pixels. Viewer fonts, mobile styling and
+Discord image resampling can still affect appearance; a server-side PNG cannot
+query every viewer's settings. Rounded letters such as `O` also exceed cap height.
 
-The same padding setting applies to ordinary chat. Its default 16px text has
-an 11.04px cap height, while [normal emoji use 1.375em](https://discord.com/assets/419070.51520158c0dc856e.css)
-(22px at 16px text). To target ordinary chat instead, use `padding = 24.9091`.
-BlockBot cannot read each Discord viewer's font and display settings.
-
-Padding is applied after tinting and before the artwork hash, slot reservation,
-and upload. Changing it creates correctly sized variants on demand without a
-resource-pack download or cache deletion. The original pack artwork remains
-in the disk cache. Each size/colour variant has its own persisted usage count;
-old sizes remain until normal least-used eviction removes them. Replacement
+Layout is applied after tinting and before hashing, slot reservation and upload.
+Different layouts create variants on demand without downloading the pack again
+or deleting its cache. Each size/colour variant has its own persisted usage count;
+old variants remain until normal least-used eviction removes them. Replacement
 still completes before sending the message.
 
 Set `enabled = false` to omit custom glyphs without making Discord emoji API
@@ -291,10 +301,11 @@ failure, simultaneous increments, delayed deletion/upload/send responses,
 queue cancellation, and ambiguous deletion failures.
 Colour tests cover inherited styles, translated arguments, per-colour upload
 reuse, alpha preservation, disabled tinting, and nearest-neighbour pixel output.
-Padding tests cover the cap-height calculation, transparent bounds, unchanged
-aspect ratio and pixel colours, invalid settings, cached upload reuse, and
-replacement of an old size before sending when no free emoji slots remain.
-Live rendering still needs verification against your pack and Discord server.
+Layout tests cover source-font metrics against measured baselines, transparent
+bounds, wide/tall artwork, scaling and vertical adjustment, nearest-neighbour
+pixels, invalid settings, legacy padding, persisted upload reuse, and replacement
+before sending when no free slots remain. A local Discord browser preview verified
+the generated PNGs in chat and embed styles; tests do not post to Discord.
 
 ## Build and use
 

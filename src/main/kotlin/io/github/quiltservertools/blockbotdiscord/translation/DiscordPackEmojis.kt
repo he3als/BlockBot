@@ -65,6 +65,7 @@ internal class DiscordPackEmojis(
     private var retryAfter = Long.MIN_VALUE
     private var invalidPrefix: String? = null
     private var invalidPadding: Double? = null
+    private var invalidLayout: EmojiLayout? = null
     private var slotsUnavailable = false
     private val usage = mutableMapOf<String, EmojiUsage>()
     private var useOrder = 0L
@@ -108,6 +109,7 @@ internal class DiscordPackEmojis(
         enabled: Boolean = true,
         prefix: String = DEFAULT_PREFIX,
         padding: Double = 0.0,
+        layout: EmojiLayout? = null,
     ): String {
         val points = text.codePoints().toArray()
         if (points.none(ResourcePackGlyphs::isPrivateUse)) return text
@@ -128,7 +130,17 @@ internal class DiscordPackEmojis(
                     DEFAULT_PREFIX
                 }
                 if (managedPrefixes.add(namePrefix)) usageDirty = true
-                val imagePadding = if (padding.isFinite() && padding in 0.0..49.0) {
+                val imageLayout = if (layout == null || layout.isValid()) {
+                    invalidLayout = null
+                    layout
+                } else {
+                    if (invalidLayout != layout) {
+                        warn("Invalid ResourcePackEmojis layout; using default ${layout.context.name.lowercase()} dimensions, scale and offset")
+                        invalidLayout = layout
+                    }
+                    EmojiLayout(layout.context)
+                }
+                val imagePadding = if (imageLayout != null || (padding.isFinite() && padding in 0.0..49.0)) {
                     invalidPadding = null
                     padding
                 } else {
@@ -143,9 +155,11 @@ internal class DiscordPackEmojis(
                     val icons = points.distinct().filter { glyphs[it]?.isNotEmpty() == true }
                     if (icons.isEmpty()) return@withLock
                     // Transform before naming, reserving slots or uploading. A new
-                    // padding value gets a new artwork hash and cannot reuse an old ID.
+                    // layout gets a new artwork hash and cannot reuse an old ID.
                     val images = icons.associateWith {
-                        Base64.getDecoder().decode(ResourcePackGlyphs.pad(glyphs.getValue(it), imagePadding))
+                        val artwork = glyphs.getValue(it)
+                        Base64.getDecoder().decode(if (imageLayout == null) ResourcePackGlyphs.pad(artwork, imagePadding)
+                            else ResourcePackGlyphs.layout(artwork, imageLayout))
                     }
                     val needed = images.values.map { emojiName(it, namePrefix) }.toSet()
                     if (scope != null) pending.getOrPut(scope) { mutableSetOf() }.addAll(needed)
