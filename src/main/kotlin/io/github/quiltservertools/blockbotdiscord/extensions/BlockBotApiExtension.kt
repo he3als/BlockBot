@@ -50,27 +50,14 @@ import net.fabricmc.loader.api.FabricLoader
 import net.kyori.adventure.text.KeybindComponent
 import net.kyori.adventure.text.TranslatableComponent
 import net.minecraft.advancements.Advancement
-import net.minecraft.core.component.DataComponents
-import net.minecraft.world.item.component.ItemLore
-import net.minecraft.world.item.ItemStack
-import net.minecraft.world.item.Items
 import net.minecraft.server.MinecraftServer
 import net.minecraft.server.level.ServerPlayer
 import net.minecraft.world.InteractionResult
 import net.minecraft.ChatFormatting
-import net.minecraft.network.chat.ClickEvent
 import net.minecraft.network.chat.Component
 import net.minecraft.network.chat.HoverEvent
 import net.minecraft.network.chat.MutableComponent
-import net.minecraft.network.chat.Style
-import net.minecraft.util.Mth.clamp
-import net.minecraft.world.item.ItemStackTemplate
 import org.koin.core.component.inject
-import java.net.URI
-import java.net.URL
-import javax.imageio.ImageIO
-import kotlin.math.ceil
-import kotlin.math.max
 
 
 class BlockBotApiExtension : Extension(), Bot {
@@ -213,76 +200,7 @@ class BlockBotApiExtension : Extension(), Bot {
             val interpolateImages = config[ChatRelaySpec.MinecraftFormatSpec.imageInterpolation]
 
             for (attachment in message.attachments) {
-                var hoverEvent: HoverEvent? = null
-
-                if (appendImages && attachment.isImage && attachment.size < 8 * 1024 * 1024) {
-                    // The entire message (serialized in json) can at most be 65535 bytes,
-                    // see DataOutputStream.writeUTF(String str, DataOutput out)
-
-                    // Each pixel adds ~40 characters to the final string
-                    // We want to use 64000 characters for the message lore. So we can have at most 1600 pixels.
-                    // The easiest implementation is to just limit the width and height to 40 pixels.
-                    val image = ImageIO.read(URL(attachment.data.proxyUrl))
-
-                    val stepSizeWidth = (ceil(image.width.toDouble() / 40).toInt()).coerceAtLeast(1)
-                    val stepSizeHeight = (ceil(image.height.toDouble() / 40).toInt()).coerceAtLeast(1)
-                    val stepSize = max(stepSizeWidth, stepSizeHeight)
-                    val stepSquared = stepSize * stepSize
-                    val width = image.width
-                    val height = image.height
-
-                    var x = 0
-                    var y = 0
-
-                    val list = mutableListOf<Component>()
-
-                    while (y < height) {
-                        val text = Component.empty().setStyle(Style.EMPTY.withItalic(false))
-                        while (x < width) {
-                            var rgb: Int
-
-                            if (interpolateImages && stepSize != 1) {
-                                var r = 0
-                                var g = 0
-                                var b = 0
-
-                                for (x2 in 0 until stepSize) {
-                                    for (y2 in 0 until stepSize) {
-                                        val color =
-                                            image.getRGB(clamp(x + x2, 0, width - 1), clamp(y + y2, 0, height - 1))
-                                        r += color.and(0xff0000).shr(16)
-                                        g += color.and(0x00ff00).shr(8)
-                                        b += color.and(0x0000ff)
-                                    }
-                                }
-
-                                rgb = r / stepSquared
-                                rgb = (rgb.shl(8)) + g / stepSquared
-                                rgb = (rgb.shl(8)) + b / stepSquared
-                            } else {
-                                rgb = image.getRGB(x, y).and(0xffffff)
-                            }
-                            val pixel = Component.literal("█").setStyle(Style.EMPTY.withColor(rgb))
-                            text.append(pixel)
-                            x += stepSize
-                        }
-
-                        list.add(text)
-                        y += stepSize
-                        x = 0
-                    }
-
-                    val stack = ItemStack(Items.STICK)
-                    stack.set(DataComponents.LORE, ItemLore(list))
-                    stack.set(DataComponents.CUSTOM_NAME, Component.empty())
-                    hoverEvent = HoverEvent.ShowItem(ItemStackTemplate.fromStack(stack))
-                }
-
-                attachments.add("[${attachment.filename}]".literal().withStyle {
-                    it.withColor(ChatFormatting.BLUE)
-                        .withClickEvent(ClickEvent.OpenUrl(URI(attachment.url)))
-                        .withHoverEvent(hoverEvent)
-                })
+                attachments.add(attachment.toMinecraftMessage(appendImages, interpolateImages))
             }
         }
 

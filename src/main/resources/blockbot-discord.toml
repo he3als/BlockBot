@@ -29,6 +29,7 @@ escapeIngameMarkdown = false
     # Supports Simplified Text Format and Placeholder API with server context
     replyFormat = "<gray>(Replying to @{sender}: <hover:'{message}'>{summary}</hover>)</gray>"
     # Try to add images to messages
+    # Images that cannot be previewed still appear as download links
     appendImages = false
     # Use image interpolation
     imageInterpolation = false
