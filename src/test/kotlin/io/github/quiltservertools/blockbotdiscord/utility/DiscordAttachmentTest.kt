@@ -19,7 +19,6 @@ import kotlinx.coroutines.runBlocking
 import net.minecraft.core.component.DataComponents
 import net.minecraft.network.chat.ClickEvent
 import net.minecraft.network.chat.HoverEvent
-import net.minecraft.world.item.component.ItemLore
 import org.junit.jupiter.api.BeforeAll
 import java.awt.image.BufferedImage
 import java.io.ByteArrayOutputStream
@@ -80,7 +79,7 @@ class DiscordAttachmentTest {
             assertEquals(URI(url), (component.style.clickEvent as ClickEvent.OpenUrl).uri())
             assertTrue(component.style.hoverEvent is HoverEvent.ShowItem)
             val item = (component.style.hoverEvent as HoverEvent.ShowItem).item()
-            val lore = item.components().entrySet().single { it.key == DataComponents.LORE }.value.get() as ItemLore
+            val lore = assertNotNull(item.components().split().added().get(DataComponents.LORE))
             assertEquals(22, lore.lines().size)
             assertTrue(lore.lines().all { it.string.length == 40 })
         }

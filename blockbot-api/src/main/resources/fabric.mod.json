@@ -25,7 +25,8 @@
     "blockbot-api.mixins.json"
   ],
   "depends": {
-    "java": ">=21",
+    "minecraft": "~26.3",
+    "java": ">=25",
     "fabricloader": ">=${fabricLoader}",
     "fabric-api": ">=${fabricApi}"
   }

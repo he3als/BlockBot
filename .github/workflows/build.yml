@@ -33,7 +33,7 @@ jobs:
             ${{ runner.os }}-gradle-
 
       - name: 🔨 Build artifacts
-        run: gradle build
+        run: bash gradlew build
 
       - name: 📦 Upload artifacts
         uses: actions/upload-artifact@v4

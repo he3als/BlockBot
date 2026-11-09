@@ -124,15 +124,16 @@ Deleting the pack's cache directory while stopped forces a fresh download.
 
 ## Building
 
-Use JDK 25 for Minecraft 26.2:
+Use JDK 25 for Minecraft 26.3:
 
 ```sh
 bash gradlew clean build --console=plain
 ```
 
 Stop the server, replace the existing BlockBot jar in `mods/` with
-`build/libs/blockbot-discord-2.0.9+26.2.jar`, and restart. Keep Fabric API,
-Fabric Language Kotlin and your existing bot configuration.
+`build/libs/blockbot-discord-2.0.9+26.3.jar`, and restart. Use Fabric Loader
+0.19.5 or newer and Fabric API 0.164.0+26.3 or newer for Minecraft 26.3.
+Keep Fabric Language Kotlin and your existing bot configuration.
 
 Run tests with `bash gradlew test --console=plain`. Tests use local packs and
 mock Discord requests; they do not send messages to Discord.
